@@ -1,0 +1,23 @@
+{
+  "name": "agent-hub",
+  "version": "1.0.0",
+  "description": "Local-first Agent Hub control plane and dashboard",
+  "scripts": {
+    "adapter:reference": "node examples/reference-sidecar.mjs",
+    "dev": "npm run build -w @agent-hub/shared && concurrently -n shared,server,web -c yellow,cyan,magenta \"npm run dev -w @agent-hub/shared\" \"npm run dev -w @agent-hub/server\" \"npm run dev -w @agent-hub/web\"",
+    "build": "npm run build -w @agent-hub/shared && npm run build -w @agent-hub/server && npm run build -w @agent-hub/web",
+    "typecheck": "npm run typecheck -w @agent-hub/shared && npm run typecheck -w @agent-hub/server && npm run typecheck -w @agent-hub/web"
+  },
+  "license": "ISC",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

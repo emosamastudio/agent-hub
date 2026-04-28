@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+
+apps/server/data/
+apps/server/*.db
+apps/server/*.sqlite
+
+apps/web/dist/
+apps/web/node_modules/
+
+packages/shared/dist/
+
+.env
+.env.local
