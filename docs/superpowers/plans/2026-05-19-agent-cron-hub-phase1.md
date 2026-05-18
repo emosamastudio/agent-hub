@@ -186,7 +186,7 @@ export async function closePool(): Promise<void> {
 // apps/server/src/db/schema.ts
 import {
   pgTable, uuid, text, integer, timestamp, boolean,
-  jsonb, numeric, pgEnum, uniqueIndex,
+  jsonb, numeric, pgEnum, uniqueIndex, bigserial, primaryKey,
 } from "drizzle-orm/pg-core";
 
 export const triggerTypeEnum = pgEnum("trigger_type", [
@@ -312,12 +312,12 @@ export const agentCooldowns = pgTable("agent_cooldowns", {
   lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull(),
   runCount: integer("run_count").default(0),
 }, (table) => ({
-  pk: uniqueIndex("idx_cooldowns_pk").on(table.agentName, table.cooldownKey),
+  pk: primaryKey({ columns: [table.agentName, table.cooldownKey] }),
 }));
 
 // --- alert_log ---
 export const alertLog = pgTable("alert_log", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: bigserial("id", { mode: "number" }).primaryKey(),
   ruleName: text("rule_name").notNull(),
   severity: text("severity").notNull(),
   agentId: uuid("agent_id").references(() => agents.id),
@@ -717,6 +717,14 @@ export class ExecutionRepository {
     }
   }
 
+  async countByAgentAndStatus(agentId: string, statuses: string[]) {
+    const result = await this.db.execute(sql`
+      SELECT COUNT(*)::int as cnt FROM executions
+      WHERE agent_id = ${agentId} AND status IN (${sql.join(statuses)})
+    `);
+    return (result.rows[0] as any).cnt ?? 0;
+  }
+
   async expireOldExecutions(retentionDays: number) {
     await this.db.execute(sql`
       DELETE FROM executions WHERE created_at < now() - interval '${sql.raw(String(retentionDays))} days'
@@ -1077,8 +1085,6 @@ interface SchedulerContext {
   agentRepo: AgentRepository;
   executionRepo: ExecutionRepository;
   traceRepo: TraceRepository;
-  // Long-poll waiters: Map<agentId, Deferred[]>
-  pollWaiters: Map<string, Array<{ resolve: (execution: any) => void; reject: (err: Error) => void }>>;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -1108,7 +1114,10 @@ async function tick(ctx: SchedulerContext) {
   // Step 5: AlertEvaluator (every 10 ticks)
   try { await alertEvaluator(ctx); } catch (e) { console.error("AlertEvaluator failed:", e); }
 
-  // Step 6: Matcher — always runs (not leader-protected in v1 single instance)
+  // Step 6: RetentionCleanup (once per day, early-return inside)
+  try { await retentionCleanup(ctx); } catch (e) { console.error("RetentionCleanup failed:", e); }
+
+  // Step 7: Matcher — always runs (not leader-protected in v1 single instance)
   try { await matcher(ctx); } catch (e) { console.error("Matcher failed:", e); }
 }
 
@@ -1122,19 +1131,14 @@ async function cronEvaluator(ctx: SchedulerContext) {
     const nextRun = cron.nextRun(lastRun);
     if (!nextRun || nextRun > new Date()) continue;
 
-    // Check max_pending_queue
-    const pending = await ctx.executionRepo.findAll({
-      agentId: agent.id, limit: 0,
-    });
-    // Count queued + running for this agent
-    const activeCount = agent.activeExecutionCount;
-
-    if (activeCount >= agent.maxPendingQueue) {
-      console.warn(`Agent ${agent.name}: max_pending_queue (${agent.maxPendingQueue}) reached, skipping cron`);
+    // Check max_pending_queue: count queued + running
+    const pending = await ctx.executionRepo.countByAgentAndStatus(agent.id, ["queued", "running"]);
+    if (pending >= agent.maxPendingQueue) {
+      console.warn(`Agent ${agent.name}: max_pending_queue (${agent.maxPendingQueue}) reached (${pending} pending), skipping cron`);
       continue;
     }
 
-    const availableSlots = agent.maxPendingQueue - activeCount;
+    const availableSlots = agent.maxPendingQueue - pending;
 
     if (agent.misfirePolicy === "drop") {
       // Skip, wait for next natural trigger
@@ -1218,28 +1222,13 @@ async function retryManager(ctx: SchedulerContext) {
   }
 }
 
-// ─── Matcher ───
-async function matcher(ctx: SchedulerContext) {
-  const queued = await ctx.executionRepo.findQueued();
-  for (const row of queued) {
-    // Filter by local waiters
-    const waiters = ctx.pollWaiters.get(row.execution.agentId);
-    const hasWaiter = waiters && waiters.length > 0;
-    const hasPushTarget = !!row.agentExecutorHost;
-
-    if (!hasWaiter && !hasPushTarget) continue;
-
-    const claimed = await ctx.executionRepo.claimForDispatch(row.execution.id);
-    if (!claimed) continue; // claimed by another instance
-
-    await ctx.agentRepo.incrementExecutionCount(row.execution.agentId);
-
-    if (hasWaiter) {
-      const waiter = waiters!.shift()!;
-      waiter.resolve(claimed);
-    }
-    // Note: push mode (POST to executor_host) implemented in Task 7
-  }
+// ─── Matcher (Phase 1: no-op — dispatch handled in poll route) ───
+// In Phase 1 single-instance, dispatch is done directly by the poll route
+// (Task 7). Matcher becomes active in Phase 5 multi-instance where push mode
+// and cross-instance long-poll waiter routing are needed. The tick() loop
+// still calls matcher() so the function skeleton is in place for Phase 5.
+async function matcher(_ctx: SchedulerContext) {
+  // Phase 1: no-op. Dispatch happens in GET /api/executors/poll.
 }
 
 // ─── AlertEvaluator ───
@@ -1258,7 +1247,6 @@ async function retentionCleanup(ctx: SchedulerContext) {
   if (today === lastCleanupDate) return;
   lastCleanupDate = today;
 
-  await ctx.traceRepo.findByExecution(""); // dummy — real cleanup in executionRepo
   await ctx.executionRepo.expireOldTraces(serverConfig.traceRetentionDays);
   await ctx.executionRepo.expireOldExecutions(serverConfig.executionRetentionDays);
 }
@@ -1273,7 +1261,6 @@ const ctx: SchedulerContext = {
   agentRepo,
   executionRepo,
   traceRepo,
-  pollWaiters: new Map(),
 };
 startScheduler(ctx);
 ```
@@ -1368,9 +1355,7 @@ const traceBatchSchema = z.object({
   })),
 });
 
-interface ExtendedAppContext extends AppContext {
-  pollWaiters: Map<string, Array<{ resolve: (execution: any) => void; reject: (err: Error) => void }>>;
-}
+interface ExtendedAppContext extends AppContext {}
 
 export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   // ── Health ──
@@ -1440,25 +1425,38 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     return { ok: true };
   });
 
-  // ── Executor Poll (long-poll) ──
+  // ── Executor Poll (dispatch via poll route — Phase 1 single-instance) ──
+  // Phase 1: dispatch is handled directly in the poll route, not by Matcher.
+  // The poll route finds the first queued execution for any agent in the caller's
+  // project, atomically claims it (status=queued → running), increments active count,
+  // and returns it. Matcher is a no-op in Phase 1; it becomes relevant in Phase 5
+  // multi-instance where push mode and cross-instance waiter routing are needed.
   app.get("/api/executors/poll", async (request, reply) => {
     const projectId = getProjectId(request);
 
-    // Return pending execution for any agent in this project, or wait
     const projectAgents = await ctx.agentRepo.findAll({ projectId, enabled: true });
     const agentIds = projectAgents.map(a => a.id);
+    if (agentIds.length === 0) return reply.status(204).send();
 
-    // Check if any queued execution exists for these agents
-    const queuedExecs = await ctx.executionRepo.findAll({ limit: 100 });
-    const match = queuedExecs.find(e => agentIds.includes(e.agentId) && e.status === "queued");
+    // Find the oldest queued execution for any agent in this project
+    // that has an available concurrency slot
+    const queuedExecs = await ctx.executionRepo.findQueued(); // joins agents, filters status='queued' + online + slot check
+    const match = queuedExecs.find(e => agentIds.includes(e.execution.agentId));
 
-    if (match) {
-      return reply.send(match);
+    if (!match) {
+      return reply.status(204).send();
     }
 
-    // No work — register long-poll waiter then timeout after 30s
-    // Simplified: return 204 immediately (full long-poll with Deferred in Task 6 matcher)
-    return reply.status(204).send();
+    // Atomically claim: status=queued → running, set started_at
+    const claimed = await ctx.executionRepo.claimForDispatch(match.execution.id);
+    if (!claimed) {
+      // Another poll request already claimed it (race). Re-poll.
+      return reply.status(204).send();
+    }
+
+    await ctx.agentRepo.incrementExecutionCount(match.execution.agentId);
+
+    return reply.send(claimed);
   });
 
   // ── Execution Report ──
@@ -1627,15 +1625,17 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 }
 
 // Extract project ID from API key auth
-function getProjectId(request: any): string {
-  const auth = request.headers.authorization;
-  if (!auth || !auth.startsWith("Bearer ")) {
-    // In dev, default to first project
-    return "default";
-  }
-  // In production: look up API key hash → project_id
-  const apiKey = auth.slice(7);
-  return "default"; // simplified — real lookup against projects.api_key_hash
+/**
+ * Phase 1 auth model (simplified): All requests are scoped to a single "default"
+ * project created by the seed. API key lookup against projects.api_key_hash is NOT
+ * implemented in Phase 1 — the Bearer token is accepted but ignored. Cross-project
+ * authorization and agent-level trigger whitelists are also deferred.
+ *
+ * This means: all agents registered via SDK, all manual triggers, and all dashboard
+ * operations operate within the "default" project. Security boundaries come in Phase 5.
+ */
+function getProjectId(_request: any): string {
+  return "default";
 }
 ```
 
@@ -2085,7 +2085,7 @@ function ExecutionTable({ executions, onSelect, statusColor }: {
           <tr key={e.id} onClick={() => onSelect(e)}
             style={{ borderBottom: "1px solid #eee", cursor: "pointer" }}>
             <td style={{ padding: "0.5rem" }}>{e.started_at ? new Date(e.started_at).toLocaleTimeString() : "-"}</td>
-            <td style={{ padding: "0.5rem" }}>{e.trigger_type}</td>
+            <td style={{ padding: "0.5rem" }}>{e.trigger_type} — {e.triggered_by ?? "-"}</td>
             <td style={{ padding: "0.5rem" }}>{statusColor(e.status)} {e.status}</td>
             <td style={{ padding: "0.5rem" }}>{e.duration_ms ? `${e.duration_ms}ms` : "-"}</td>
           </tr>
