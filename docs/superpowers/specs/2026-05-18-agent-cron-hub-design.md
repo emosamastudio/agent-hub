@@ -947,16 +947,14 @@ Content-Type: application/json
 {
   "payload": { ... },                    // JSONB, validated against agent.input_schema
   "idempotency_key": "unique-key",      // required for agent-to-agent triggers
-  "dedup_policy": "skip_if_running",    // skip_if_running | skip_if_exists | allow_duplicate
-  "sync": false,                        // false = fire-and-forget (default)
-                                        // true  = block until triggered execution completes
-  "sync_timeout_seconds": 300           // max wait for sync=true (default 5 min)
+  "dedup_policy": "skip_if_running"     // skip_if_running | skip_if_exists | allow_duplicate
 }
 ```
 
 ### 8.2 Trigger Response
 
-**`sync: false` (fire-and-forget, default):**
+All triggers are **fire-and-forget** — the hub creates the execution and returns immediately. The HTTP connection is not held open. Callers that need to wait for the triggered execution to complete should poll `GET /api/executions/:id` from the SDK side.
+
 ```json
 // 202 Accepted
 {
@@ -973,17 +971,7 @@ Content-Type: application/json
 }
 ```
 
-**`sync: true` (blocking await):**
-```json
-// 200 OK (triggered execution completed)
-{
-  "execution_id": "uuid",
-  "status": "success",
-  "result_summary": "...",
-  "result_data": { ... },
-  "duration_ms": 2300
-}
-```
+**Design rationale:** Blocking sync (`sync: true`) was considered but rejected for v1. Holding HTTP connections open for up to 300 seconds is incompatible with L4/L7 load balancers (default idle timeout 60s) and adds in-memory state on the hub that is lost on restart. The value is also questionable for the current use cases — all existing agent-to-agent triggers (steward → deep_research, ingest → llm_extract) are naturally fire-and-forget: results are stored in the project's own blob store or filesystem, not passed inline to the caller. If a future use case genuinely requires blocking semantics, the SDK can implement client-side polling without any hub changes.
 
 ### 8.3 Trigger Authorization
 
