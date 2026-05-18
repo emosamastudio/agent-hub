@@ -410,69 +410,71 @@ The hub computes `cost_estimate` on trace insert as: `(input_tokens * input_cost
 
 The scheduler runs inside the Fastify server process. It uses a cron-evaluation loop + PostgreSQL-based dispatch with `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency-safe claim semantics.
 
+**The scheduler is split into two tiers:**
+
+- **Leader-only components** (protected by advisory lock): Only the Leader instance runs these. They make scheduling *decisions* (create executions, detect failures, evaluate alerts).
+- **All-instances components** (no lock needed): Every instance runs these. They handle *dispatch* to executors via long-poll or push.
+
 ```
-Scheduler (tick every 1 second, configurable via AGENT_HUB_SCHEDULER_TICK_MS)
+Leader-only (one instance holds pg_try_advisory_lock):
 │
 ├── 1. CronEvaluator
 │     SELECT * FROM agents WHERE enabled=true AND cron_expression IS NOT NULL
 │     For each agent:
 │       croner.nextRun(cron_expression, last_execution_at) <= now()
-│       → Apply misfire_policy:
-│         'fire_once': create 1 execution (skip intermediate missed windows)
-│         'fire_all':  create 1 execution per missed window (batch)
-│         'drop':      skip all; wait for next natural trigger time
+│       → Apply misfire_policy
 │       → INSERT INTO executions (agent_id, trigger_type='cron', status='queued')
 │       → UPDATE agents SET last_execution_at = now()
 │
-├── 2. Matcher (dispatch queued → running when executor is available)
-│     Uses active_execution_count on agents table (atomically maintained) instead
-│     of correlated subquery, avoiding per-row subquery overhead.
-│     SELECT e.* FROM executions e
-│     JOIN agents a ON e.agent_id = a.id
-│     WHERE e.status = 'queued'
-│       AND a.executor_status = 'online'
-│       AND a.active_execution_count < a.concurrency
-│     ORDER BY e.scheduled_at ASC
-│     LIMIT 10
-│     FOR UPDATE SKIP LOCKED
-│     
-│     For each matched execution:
-│       → UPDATE agents SET active_execution_count = active_execution_count + 1
-│       → Respond to pending long-poll request, OR
-│       → POST to executor_host (HMAC-signed, Section 4.3)
-│       → UPDATE execution SET status='running', started_at=now()
-│
-├── 3. HeartbeatMonitor
+├── 2. HeartbeatMonitor
 │     SELECT * FROM agents WHERE executor_status='online'
 │       AND last_heartbeat_at < now() - INTERVAL '30 seconds'
 │     → UPDATE SET executor_status = 'offline'
-│     → Cancel any running executions for this agent
-│     → UPDATE agents SET active_execution_count = 0
-│       (jobs will be re-queued by RetryManager or TimeoutChecker)
+│     → Cancel running executions for this agent
 │
-├── 4. TimeoutChecker
+├── 3. TimeoutChecker
 │     SELECT * FROM executions WHERE status='running'
 │       AND started_at + (agent.timeout_seconds * INTERVAL '1 second') < now()
 │     → UPDATE SET status='timeout', finished_at=now()
 │     → UPDATE agents SET active_execution_count = active_execution_count - 1
 │
-├── 5. RetryManager
+├── 4. RetryManager
 │     SELECT * FROM executions WHERE status IN ('failed','timeout')
 │       AND retry_count < agent.retry_max
 │       AND finished_at + (backoff_delay * INTERVAL '1 ms') < now()
 │     → INSERT new execution (retry_of=original.id, retry_count=original.retry_count+1)
 │     backoff_delay = min(retry_backoff_base_ms * 2^retry_count, 600000)
 │
-├── 6. RetentionCleanup (daily)
+├── 5. RetentionCleanup (daily)
 │     DELETE FROM traces WHERE created_at < now() - INTERVAL '30 days'
 │       LIMIT 10000; (repeat with pauses)
-│     DELETE FROM executions WHERE created_at < now() - INTERVAL '90 days'
-│       LIMIT 10000; (repeat with pauses)
 │
-└── 7. AlertEvaluator (every 10 seconds)
+└── 6. AlertEvaluator (every 10 seconds)
       Evaluates alerting rules (Section 13), inserts alert_log rows,
       broadcasts critical alerts via WebSocket.
+
+All-instances (every instance, independently):
+│
+└── 7. Matcher (dispatch queued → running when executor is available)
+      SELECT e.* FROM executions e
+      JOIN agents a ON e.agent_id = a.id
+      WHERE e.status = 'queued'
+        AND a.executor_status = 'online'
+        AND a.active_execution_count < a.concurrency
+      ORDER BY e.scheduled_at ASC
+      LIMIT 10
+      FOR UPDATE SKIP LOCKED
+      
+      For each matched execution:
+        → UPDATE agents SET active_execution_count = active_execution_count + 1
+        → Respond to pending long-poll request, OR
+        → POST to executor_host (HMAC-signed, Section 4.3)
+        → UPDATE execution SET status='running', started_at=now()
 ```
+
+**Why Matcher doesn't need the leader lock:** `SELECT ... FOR UPDATE SKIP LOCKED` already provides concurrency safety — two instances competing for the same rows will never claim the same execution. The `active_execution_count` increment is a simple atomic `UPDATE ... SET count = count + 1`. No leader coordination is needed for dispatch.
+
+**Benefit:** SDKs can connect to *any* instance and receive work. An SDK connected to a non-Leader instance still gets dispatched normally. Leader crash doesn't break dispatch — only scheduling decisions pause briefly until another instance acquires the lock.
 
 ### 4.2 Long-Poll Dispatch (Pull Mode)
 
@@ -488,16 +490,30 @@ Secondary mechanism. If an agent's `executor_host` is set and reachable, the hub
 
 ### 4.4 Leader Election (for HA)
 
-When running multiple hub instances, only one scheduler should be active. Leader election uses PostgreSQL advisory locks, following the River pattern:
+When running multiple hub instances, the Leader lock protects only **scheduling decisions** (CronEvaluator, HeartbeatMonitor, TimeoutChecker, RetryManager, RetentionCleanup, AlertEvaluator). Dispatch (Matcher) runs on all instances without the lock.
+
+Leader election uses PostgreSQL advisory locks, following the River pattern:
 
 ```sql
 -- Non-blocking try-lock with namespaced key (avoids collision)
 SELECT pg_try_advisory_lock(hashtext('agent_hub_scheduler'));
 ```
 
-The instance that holds the lock runs the scheduler tick. If the instance crashes, the lock is released and another instance acquires it. No external coordinator needed.
+The instance that holds the lock runs the Leader-only components. If the instance crashes, the lock is released by PostgreSQL when the connection drops, and another instance acquires it. No external coordinator needed.
 
-On leader failover, the new leader re-evaluates all state from PostgreSQL. The in-memory long-poll waiter map is lost — SDKs get a connection error from the dead leader and reconnect to another instance (requires SDK config `serverUrls: string[]` for failover).
+**Failover behavior:** When Leader crashes:
+- Scheduling pauses briefly (one tick at most — the next instance acquires the lock on its next tick attempt)
+- Dispatch continues uninterrupted on surviving instances
+- SDKs connected to the dead instance get a connection error and reconnect to another URL from `serverUrls`
+- The new Leader re-evaluates cron state from PostgreSQL (no in-memory state for scheduling decisions)
+
+**SDK serverUrls semantics:**
+- SDK accepts `serverUrls: ['http://hub1:8787', 'http://hub2:8787']`
+- On each poll attempt (including after a successful poll or a connection error), the SDK **randomly selects** a URL from the list
+- No sticky preference — this naturally distributes load and avoids all SDKs piling onto the dead Leader
+- The SDK does NOT need to know which instance is Leader — any instance can dispatch work
+
+**Instance symmetry:** All hub instances are identical. They all run the same code, expose the same API, and participate in dispatch. The only difference is which one holds the advisory lock at any moment. This is the same model as River's leader election.
 
 ### 4.5 Scale Boundaries & Target
 
@@ -782,12 +798,15 @@ Each SDK runs an internal loop:
 │     (next heartbeat in 10s will retry) │
 │                                        │
 │  3. Main loop:                         │
-│     GET /api/executors/poll            │
+│     Randomly select URL from serverUrls │
+│     GET {url}/api/executors/poll        │
 │     (long-poll, up to 30s timeout)     │
 │                                        │
 │     204 → re-poll immediately          │
-│     Connection error → backoff retry   │
-│     5min continuous failures → log error│
+│     200 → process execution            │
+│     Connection error → random reselect │
+│       URL from serverUrls, backoff     │
+│       retry (1s, 2s, 4s... max 30s)   │
 │                                        │
 │     If execution received:             │
 │     ├── Lookup handler by name         │
