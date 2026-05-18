@@ -1,6 +1,6 @@
 # Agent Cron Hub — Design Spec
 
-**Status:** Draft
+**Status:** Draft (revised after architecture stress-test)
 **Date:** 2026-05-18
 **Scope:** Transform agent-hub from a local agent monitoring dashboard into a centralized agent cron scheduling and supervision platform (xxl-job for AI agents).
 
@@ -14,10 +14,12 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 - **Cron-based scheduling** — define when agents run (traditional xxl-job model)
 - **On-demand triggering** — projects can call an API to trigger agent execution programmatically
+- **Agent-to-agent triggering** — agents can trigger other agents, forming chains with depth limits and dedup
 - **Agent registry** — all agents across all projects are visible in one place
 - **Execution history** — every run is logged with status, duration, and result
 - **LLM trace viewer** — for LLM agents, every model call is captured: prompt → response, tool calls, tokens, latency
 - **Real-time monitoring** — WebSocket-driven live dashboard showing what's running right now
+- **Alerting** — configurable rules for failures, timeouts, queue depth, and cost anomalies
 
 ### 1.2 What This Is NOT
 
@@ -29,12 +31,12 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 | Source | What We Borrow |
 |--------|---------------|
-| **xxl-job** | Admin + Executor architecture, cron management, execution logging, manual trigger |
-| **Temporal** | Task Queue concept, Event Sourcing for execution state, heartbeat with payload |
-| **Prefect** | Work Pool pattern, rich state machine, decorator-based SDK |
+| **xxl-job** | Admin + Executor architecture, cron management, execution logging, manual trigger, misfire policy |
+| **Temporal** | Task Queue concept, Event Sourcing for execution state, heartbeat with payload, child workflow ID dedup |
+| **Prefect** | Work Pool pattern, rich state machine, decorator-based SDK, `wait_for` semantics |
 | **LangFuse** | Trace → Observation data model, nested LLM call capture |
-| **River (Go)** / **Asynq** | JobArgs+Worker pairing, ServeMux handler registration, LISTEN/NOTIFY |
-| **Airflow Grid View** | Execution history as color-coded matrix |
+| **River (Go)** / **Asynq** | JobArgs+Worker pairing, ServeMux handler registration, LISTEN/NOTIFY, PG advisory locks for leader election |
+| **Airflow** | Grid View, `TriggerDagRunOperator` with `wait_for_completion` flag, pool/slot concurrency model |
 
 ---
 
@@ -53,12 +55,13 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 │                     │               │               │       │
 │              ┌──────┴───────────────┴───────────────┴──────┐│
 │              │              PostgreSQL                      ││
-│              │  (projects, agents, executions, traces)      ││
+│              │  (projects, agents, executions, traces,      ││
+│              │   cooldowns, alert_log)                      ││
 │              └──────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
           ▲                ▲                ▲
           │ HTTP/Pull      │ HTTP/Push      │ HTTP/Pull
-          │                │                │
+          │                │ (HMAC signed)  │
     ┌─────┴─────┐    ┌─────┴─────┐    ┌─────┴─────┐
     │ llm-wiki   │    │    OPH    │    │  future   │
     │ (TS SDK)   │    │ (Go SDK)  │    │ projects  │
@@ -69,11 +72,15 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 **D1: Agent Hub is the scheduling authority.** Projects no longer run their own scheduler loops. Agent Hub owns cron evaluation, job creation, and dispatch. Projects become pure executors.
 
-**D2: Pull-first communication.** Executors long-poll Agent Hub for pending work (penetrates NATs/firewalls). Push (HTTP callback) is secondary, for executors with stable, reachable endpoints.
+**D2: Pull-first communication.** Executors long-poll Agent Hub for pending work (penetrates NATs/firewalls). Push (HTTP callback) is secondary, HMAC-signed, for executors with stable, reachable endpoints.
 
-**D3: PostgreSQL as the single source of truth.** No Redis, no message broker. One database for everything: agent registry, execution state, LLM traces. Simplifies deployment and operations. This is the River/Prefect pattern.
+**D3: PostgreSQL as the single source of truth.** No Redis, no message broker. One database for everything: agent registry, execution state, LLM traces, cooldown state. Simplifies deployment and operations. This is the River/Prefect pattern.
 
 **D4: SDK does the heavy instrumentation.** The SDK auto-captures LLM calls, manages heartbeats, and reports progress. Projects don't write tracing code — they call `ctx.llm.chat()` and tracing happens automatically.
+
+**D5: Agents can trigger agents.** An agent handler can call `ctx.trigger()` to fire another agent. This enables decomposition of monolithic loops like OPH's steward. Trigger chains have depth limits and idempotency keys to prevent runaway cascades.
+
+**D6: Progressive migration.** Old and new hubs run side-by-side during transition. Projects migrate one agent at a time. No big-bang cutover.
 
 ### 2.3 Technology Choices
 
@@ -86,6 +93,9 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 | **WebSocket** | `@fastify/websocket` | Already integrated |
 | **Schema Validation** | `zod` (v4) | Already in project |
 | **Dashboard** | React + Vite (existing) | Reuse existing dashboard infrastructure |
+| **Dashboard Auth** | HTTP Basic Auth (simple password) | Minimum viable; upgrade to JWT in Phase 5 |
+| **Health/Metrics** | `GET /api/health` + `GET /api/metrics` | Essential for load balancer, monitoring |
+| **Password Hashing** | `bcrypt` or built-in `crypto.scrypt` | Dashboard password storage |
 | **Go SDK** | Custom, referencing River/Asynq patterns | Thin HTTP client + handler registry |
 | **Python SDK** | Custom, referencing Celery patterns | Thin HTTP client + decorator-based registration |
 | **TypeScript SDK** | Custom, referencing pg-boss patterns | Thin HTTP client + handler registry |
@@ -94,9 +104,9 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 | Library | Why Not |
 |---------|---------|
-| `pg-boss` | Designed for workers connecting to same PG — our executors are remote HTTP clients. The internal scheduling logic is straightforward enough without it. |
+| `pg-boss` | Designed for workers connecting to same PG — our executors are remote HTTP clients. |
 | `bullmq` | Requires Redis. We use PG-only. |
-| `temporal` | Overkill — workflow orchestration, not cron scheduling. Operational complexity too high. |
+| `temporal` | Overkill — workflow orchestration, not cron scheduling. See Section 14 for migration criteria. |
 | `celery` | Python-only, requires broker. Our executors are multi-language HTTP clients. |
 | `langfuse` | Full observability platform with ClickHouse — too heavy. We only need the trace data model. |
 
@@ -108,6 +118,9 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 ```
 Project (1) ────< Agent (N) ────< Execution (N) ────< Trace (N)
+                         │
+                         └── parent_execution_id / root_execution_id / trigger_depth
+                             (execution-to-execution chain for agent-to-agent triggers)
 ```
 
 ### 3.2 Tables
@@ -116,15 +129,19 @@ Project (1) ────< Agent (N) ────< Execution (N) ────< Tr
 
 ```sql
 CREATE TABLE projects (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          TEXT NOT NULL UNIQUE,          -- 'llm-wiki', 'oph'
-  display_name  TEXT NOT NULL,                 -- 'LLM Wiki', 'Open Project Hunter'
-  description   TEXT,
-  workspace_path TEXT,                          -- filesystem path for workspace actions
-  status        TEXT NOT NULL DEFAULT 'active', -- active | inactive | archived
-  api_key_hash  TEXT,                           -- hashed API key for SDK auth
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                    TEXT NOT NULL UNIQUE,
+  display_name            TEXT NOT NULL,
+  description             TEXT,
+  workspace_path          TEXT,
+  status                  TEXT NOT NULL DEFAULT 'active', -- active | inactive | archived
+  api_key_hash            TEXT,        -- SHA-256 hashed API key for SDK auth
+  dashboard_password_hash TEXT,        -- bcrypt hashed password for dashboard access
+  allow_trigger_from      TEXT[] DEFAULT '{}',  -- projects allowed to trigger this project's agents
+  trigger_rate_limit_per_sec INTEGER DEFAULT 50, -- global rate limit for API triggers
+  cost_config             JSONB DEFAULT '{}',    -- per-project pricing overrides
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
@@ -134,39 +151,57 @@ CREATE TABLE projects (
 CREATE TABLE agents (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name            TEXT NOT NULL,               -- unique within project: 'llm_extract'
-  display_name    TEXT NOT NULL,               -- 'LLM 知识提取'
+  name            TEXT NOT NULL,               -- unique within project
+  display_name    TEXT NOT NULL,
   description     TEXT,
-  agent_type      TEXT NOT NULL,               -- 'cron_task' | 'llm_agent' | 'agent_loop'
-  
+  agent_type      TEXT NOT NULL,               -- 'cron_task' | 'llm_agent'
+
   -- Scheduling
-  cron_expression TEXT,                         -- NULL = manual trigger only
+  cron_expression TEXT,                         -- NULL = manual/API trigger only
   enabled         BOOLEAN NOT NULL DEFAULT true,
-  concurrency     INTEGER NOT NULL DEFAULT 1,   -- max parallel executions
-  timeout_seconds INTEGER NOT NULL DEFAULT 600, -- per-execution timeout
+  misfire_policy  TEXT NOT NULL DEFAULT 'fire_once',
+                    -- 'fire_once': skip missed windows, fire once at next tick (xxl-job default)
+                    -- 'fire_all':   fire for every missed cron window (catch-up)
+                    -- 'drop':       skip all missed windows, wait for next scheduled time
+  concurrency     INTEGER NOT NULL DEFAULT 1,   -- max parallel running executions
+  max_pending_queue INTEGER NOT NULL DEFAULT 100, -- max queued + running; 429 if exceeded
+  timeout_seconds INTEGER NOT NULL DEFAULT 600,
   retry_max       INTEGER NOT NULL DEFAULT 3,
-  retry_backoff_base_ms INTEGER NOT NULL DEFAULT 30000, -- 30s base for exponential backoff
-  
-  -- Handler routing (maps to SDK handler name)
-  handler_name    TEXT,                         -- 'refresh_source_channel', 'deep_research'
-  
+  retry_backoff_base_ms INTEGER NOT NULL DEFAULT 30000,
+
+  -- Safety guards (agent_loop / ReAct agents)
+  max_turns       INTEGER,                     -- max ReAct loop turns before auto-cancel
+  max_cost_usd    NUMERIC(10,6),               -- max total LLM cost per execution
+
+  -- Handler routing
+  handler_name    TEXT,
+
   -- Executor discovery
-  executor_host   TEXT,                         -- '10.0.1.5:9191' — SDK registers this
+  executor_host   TEXT,                         -- SDK registers this on startup
   executor_status TEXT NOT NULL DEFAULT 'offline', -- online | offline | degraded
-  
-  -- Schema (JSON Schema for input validation)
-  input_schema    JSONB,                        -- {'type':'object','properties':{...}}
-  
-  -- Labels for grouping/filtering
-  labels          JSONB DEFAULT '{}',           -- {'env':'prod','team':'data'}
-  
+
+  -- Input validation
+  input_schema    JSONB,
+
+  -- Trigger authorization
+  allow_trigger_by JSONB DEFAULT '{}',
+                    -- {"projects": ["oph"], "agents": ["steward_backlog"]}
+                    -- {} = any agent in same project can trigger (default)
+
+  -- Idempotency
+  idempotency_window_seconds INTEGER NOT NULL DEFAULT 3600,  -- 1 hour
+
+  -- Labels
+  labels          JSONB DEFAULT '{}',
+
   -- Heartbeat
   last_heartbeat_at TIMESTAMPTZ,
   last_execution_at TIMESTAMPTZ,
-  
+  active_execution_count INTEGER NOT NULL DEFAULT 0, -- atomically maintained counter
+
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  
+
   UNIQUE(project_id, name)
 );
 
@@ -181,7 +216,8 @@ CREATE INDEX idx_agents_enabled ON agents(enabled) WHERE enabled = true;
 |------|----------------|------------|-------------|
 | `cron_task` | Usually set | No | Shell scripts, data sync, API calls |
 | `llm_agent` | Usually set | **Yes** | LLM extraction, research, synthesis |
-| `agent_loop` | Usually absent | **Yes** | Long-running ReAct agents (OPH steward) |
+
+Note: `agent_loop` was considered but removed. Long-running loops (like OPH steward) decompose into individual cron agents (one per check) with agent-to-agent triggering. Individual checks that currently run in a 60s tick become their own agents with natural cadences (every minute, every 30 minutes, daily). This provides better visibility and independent control. Truly continuous workloads (file watchers, message queue consumers) remain as custom processes with `trigger_type='api'`.
 
 #### `executions`
 
@@ -194,34 +230,50 @@ CREATE TYPE execution_status AS ENUM (
 CREATE TABLE executions (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   agent_id        UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  
+
   -- Trigger info
   trigger_type    trigger_type NOT NULL,
   triggered_by    TEXT,                         -- 'cron', 'user:emo', 'api:oph-steward'
-  
+
+  -- Agent-to-agent trigger chain (Temporal child workflow pattern)
+  parent_execution_id UUID REFERENCES executions(id),  -- who triggered me
+  root_execution_id   UUID REFERENCES executions(id),  -- ultimate root of this chain
+  trigger_depth       INTEGER NOT NULL DEFAULT 0,
+
+  -- Idempotency (Prefect/Stripe pattern)
+  idempotency_key TEXT,                         -- unique within agent + time window
+
   -- Status
   status          execution_status NOT NULL DEFAULT 'queued',
-  
+
   -- Timing
-  scheduled_at    TIMESTAMPTZ,                  -- when cron said to fire
+  scheduled_at    TIMESTAMPTZ,
   started_at      TIMESTAMPTZ,
   finished_at     TIMESTAMPTZ,
-  duration_ms     INTEGER,                      -- computed: finished_at - started_at
-  
+  duration_ms     INTEGER,
+
+  -- Last activity (for stuck-vs-slow diagnosis)
+  last_activity_at TIMESTAMPTZ,                 -- updated on each trace write or heartbeat
+
   -- Result
-  input_payload   JSONB,                        -- what was sent to the executor
-  result_summary  TEXT,                         -- one-line summary on success
-  result_data     JSONB,                        -- structured result from executor
-  error_message   TEXT,                         -- error details on failure
-  error_stack     TEXT,                         -- stack trace if available
-  
+  input_payload   JSONB,
+  result_summary  TEXT,
+  result_data     JSONB,
+  error_message   TEXT,
+  error_stack     TEXT,
+
+  -- Trace completeness
+  trace_count_expected INTEGER,                 -- declared by SDK on report
+  trace_count_actual   INTEGER DEFAULT 0,       -- actual trace rows for this execution
+  trace_incomplete     BOOLEAN DEFAULT false,   -- true if actual < expected
+
   -- Retry
   retry_count     INTEGER NOT NULL DEFAULT 0,
   retry_of        UUID REFERENCES executions(id),
-  
-  -- Executor info (snapshot at dispatch time)
-  executor_host   TEXT,                         -- which executor ran this
-  
+
+  -- Executor info
+  executor_host   TEXT,
+
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -230,6 +282,11 @@ CREATE INDEX idx_executions_status ON executions(status);
 CREATE INDEX idx_executions_scheduled ON executions(scheduled_at);
 CREATE INDEX idx_executions_created ON executions(created_at DESC);
 CREATE INDEX idx_executions_agent_status ON executions(agent_id, status);
+CREATE INDEX idx_executions_parent ON executions(parent_execution_id);
+CREATE INDEX idx_executions_root ON executions(root_execution_id);
+CREATE UNIQUE INDEX idx_executions_idempotency
+  ON executions(agent_id, idempotency_key)
+  WHERE status IN ('queued', 'running') AND idempotency_key IS NOT NULL;
 ```
 
 #### `traces`
@@ -240,41 +297,71 @@ CREATE TYPE trace_role AS ENUM ('system', 'user', 'assistant', 'tool');
 CREATE TABLE traces (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   execution_id    UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
-  
+
   -- Ordering within execution
-  turn_index      INTEGER NOT NULL,             -- 0, 1, 2, ... (ReAct loop turn)
-  span_index      INTEGER NOT NULL DEFAULT 0,   -- order within a turn
-  parent_span_id  UUID REFERENCES traces(id),   -- for nested spans (tool calls within LLM call)
-  
+  turn_index      INTEGER NOT NULL,
+  span_index      INTEGER NOT NULL DEFAULT 0,
+  parent_span_id  UUID REFERENCES traces(id),
+
   -- Role & Type
   role            trace_role NOT NULL,
   span_type       TEXT NOT NULL DEFAULT 'llm',  -- 'llm' | 'tool_call' | 'tool_result' | 'custom'
-  
+
   -- Model info (for LLM spans)
-  model           TEXT,                         -- 'deepseek-v4-pro', 'claude-opus-4-7'
-  provider        TEXT,                         -- 'leihuo', 'anthropic'
-  
-  -- Content
-  input_content   TEXT,                         -- prompt / input (may be large)
-  output_content  TEXT,                         -- response / output
-  tool_calls      JSONB,                        -- [{name, arguments}]
-  tool_results    JSONB,                        -- [{name, result}]
-  
+  model           TEXT,
+  provider        TEXT,
+
+  -- Content (TOAST-compressed by PostgreSQL automatically for rows >2KB)
+  input_content   TEXT,
+  output_content  TEXT,
+  tool_calls      JSONB,
+  tool_results    JSONB,
+
   -- Metrics
   input_tokens    INTEGER,
   output_tokens   INTEGER,
-  cost_estimate   NUMERIC(10,6),               -- estimated USD cost
-  latency_ms      INTEGER,                      -- this span's duration
-  
+  cost_estimate   NUMERIC(10,6),               -- hub-computed from pricing table
+  latency_ms      INTEGER,
+
   -- Metadata
-  metadata        JSONB DEFAULT '{}',           -- arbitrary key-value
-  
+  metadata        JSONB DEFAULT '{}',
+
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_traces_execution ON traces(execution_id);
 CREATE INDEX idx_traces_turn ON traces(execution_id, turn_index);
 CREATE INDEX idx_traces_parent ON traces(parent_span_id);
+```
+
+#### `agent_cooldowns` (DB-backed cooldown state, survives restarts)
+
+```sql
+CREATE TABLE agent_cooldowns (
+  agent_name    TEXT NOT NULL,
+  cooldown_key  TEXT NOT NULL,                  -- e.g., 'signal_detection', 'trend_generation'
+  last_run_at   TIMESTAMPTZ NOT NULL,
+  run_count     INTEGER DEFAULT 0,
+  PRIMARY KEY (agent_name, cooldown_key)
+);
+```
+
+Used by evaluator agents (steward checks) to persist cooldown state across restarts. Replaces volatile in-memory `time.Time` fields. Each evaluator checks `WHERE last_run_at < now() - cooldown_duration` before running and upserts after completing.
+
+#### `alert_log`
+
+```sql
+CREATE TABLE alert_log (
+  id          BIGSERIAL PRIMARY KEY,
+  rule_name   TEXT NOT NULL,                    -- 'agent_offline', 'failure_rate_spike', etc.
+  severity    TEXT NOT NULL,                    -- 'critical' | 'warning' | 'info'
+  agent_id    UUID REFERENCES agents(id),
+  message     TEXT NOT NULL,
+  context     JSONB,                            -- relevant execution IDs, counts, etc.
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_alert_log_created ON alert_log(created_at DESC);
 ```
 
 ### 3.3 Writes Pattern — Append-Only Trace Storage
@@ -290,8 +377,30 @@ Following the LangFuse pattern: traces are written **during execution**, not in 
 |-------|------------------|--------------|
 | `executions` | 90 days | `AGENT_HUB_EXECUTION_RETENTION_DAYS` |
 | `traces` | 30 days | `AGENT_HUB_TRACE_RETENTION_DAYS` |
+| `alert_log` | 180 days | `AGENT_HUB_ALERT_RETENTION_DAYS` |
 
-A background maintenance job (part of the scheduling engine) purges expired rows daily.
+A background maintenance job purges expired rows daily. Deletion is batched (LIMIT 10000 per iteration with short pauses) to avoid long-running transactions locking the tables.
+
+### 3.5 Content Compression
+
+Trace `input_content` and `output_content` are TEXT columns. PostgreSQL applies TOAST compression (pglz by default, lz4 on PG 14+) automatically for rows exceeding ~2KB, giving 2-4x compression. Estimated steady-state DB size for 20 agents at 30-day retention: **~8-10 GB**. If agent count doubles or retention extends to 90 days, consider truncating content to a configurable max length (e.g., 100KB) with full content stored in object storage (S3/MinIO) referenced by hash.
+
+### 3.6 Cost Tracking
+
+The hub maintains a `provider_pricing` table:
+
+```sql
+CREATE TABLE provider_pricing (
+  provider              TEXT NOT NULL,
+  model                 TEXT NOT NULL,
+  input_cost_per_1k     NUMERIC(10,6) NOT NULL,
+  output_cost_per_1k    NUMERIC(10,6) NOT NULL,
+  effective_from        DATE NOT NULL,
+  PRIMARY KEY (provider, model, effective_from)
+);
+```
+
+The hub computes `cost_estimate` on trace insert as: `(input_tokens * input_cost_per_1k + output_tokens * output_cost_per_1k) / 1000`. Projects can override prices via `projects.cost_config` for internal/custom models (e.g., leihuo proxy).
 
 ---
 
@@ -299,31 +408,38 @@ A background maintenance job (part of the scheduling engine) purges expired rows
 
 ### 4.1 Internal Architecture
 
-The scheduler runs inside the Fastify server process (same process as the API/dashboard). It uses a cron-evaluation loop + PostgreSQL-based dispatch with `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency-safe claim semantics.
+The scheduler runs inside the Fastify server process. It uses a cron-evaluation loop + PostgreSQL-based dispatch with `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency-safe claim semantics.
 
 ```
-Scheduler (runs every 1 second, configurable via AGENT_HUB_SCHEDULER_TICK_MS)
+Scheduler (tick every 1 second, configurable via AGENT_HUB_SCHEDULER_TICK_MS)
 │
 ├── 1. CronEvaluator
 │     SELECT * FROM agents WHERE enabled=true AND cron_expression IS NOT NULL
 │     For each agent:
 │       croner.nextRun(cron_expression, last_execution_at) <= now()
+│       → Apply misfire_policy:
+│         'fire_once': create 1 execution (skip intermediate missed windows)
+│         'fire_all':  create 1 execution per missed window (batch)
+│         'drop':      skip all; wait for next natural trigger time
 │       → INSERT INTO executions (agent_id, trigger_type='cron', status='queued')
 │       → UPDATE agents SET last_execution_at = now()
 │
 ├── 2. Matcher (dispatch queued → running when executor is available)
+│     Uses active_execution_count on agents table (atomically maintained) instead
+│     of correlated subquery, avoiding per-row subquery overhead.
 │     SELECT e.* FROM executions e
 │     JOIN agents a ON e.agent_id = a.id
 │     WHERE e.status = 'queued'
 │       AND a.executor_status = 'online'
-│       AND (SELECT COUNT(*) FROM executions WHERE agent_id=a.id AND status='running') < a.concurrency
+│       AND a.active_execution_count < a.concurrency
 │     ORDER BY e.scheduled_at ASC
 │     LIMIT 10
 │     FOR UPDATE SKIP LOCKED
 │     
 │     For each matched execution:
+│       → UPDATE agents SET active_execution_count = active_execution_count + 1
 │       → Respond to pending long-poll request, OR
-│       → HTTP POST to executor_host
+│       → POST to executor_host (HMAC-signed, Section 4.3)
 │       → UPDATE execution SET status='running', started_at=now()
 │
 ├── 3. HeartbeatMonitor
@@ -331,22 +447,31 @@ Scheduler (runs every 1 second, configurable via AGENT_HUB_SCHEDULER_TICK_MS)
 │       AND last_heartbeat_at < now() - INTERVAL '30 seconds'
 │     → UPDATE SET executor_status = 'offline'
 │     → Cancel any running executions for this agent
+│     → UPDATE agents SET active_execution_count = 0
+│       (jobs will be re-queued by RetryManager or TimeoutChecker)
 │
 ├── 4. TimeoutChecker
 │     SELECT * FROM executions WHERE status='running'
-│       AND started_at + (agent.timeout_seconds * 1000) < now()
+│       AND started_at + (agent.timeout_seconds * INTERVAL '1 second') < now()
 │     → UPDATE SET status='timeout', finished_at=now()
+│     → UPDATE agents SET active_execution_count = active_execution_count - 1
 │
 ├── 5. RetryManager
 │     SELECT * FROM executions WHERE status IN ('failed','timeout')
 │       AND retry_count < agent.retry_max
-│       AND agent.retry_backoff_base_ms IS NOT NULL
-│       AND finished_at + backoff_delay < now()
+│       AND finished_at + (backoff_delay * INTERVAL '1 ms') < now()
 │     → INSERT new execution (retry_of=original.id, retry_count=original.retry_count+1)
+│     backoff_delay = min(retry_backoff_base_ms * 2^retry_count, 600000)
 │
-└── 6. RetentionCleanup (daily)
-      DELETE FROM traces WHERE created_at < now() - INTERVAL '30 days'
-      DELETE FROM executions WHERE created_at < now() - INTERVAL '90 days'
+├── 6. RetentionCleanup (daily)
+│     DELETE FROM traces WHERE created_at < now() - INTERVAL '30 days'
+│       LIMIT 10000; (repeat with pauses)
+│     DELETE FROM executions WHERE created_at < now() - INTERVAL '90 days'
+│       LIMIT 10000; (repeat with pauses)
+│
+└── 7. AlertEvaluator (every 10 seconds)
+      Evaluates alerting rules (Section 13), inserts alert_log rows,
+      broadcasts critical alerts via WebSocket.
 ```
 
 ### 4.2 Long-Poll Dispatch (Pull Mode)
@@ -359,18 +484,31 @@ The primary dispatch mechanism. Executors call `GET /api/executors/poll` with th
 
 ### 4.3 Push Dispatch (Callback)
 
-Secondary mechanism. If an agent's `executor_host` is set and reachable, the hub can POST to `http://{executor_host}/agent-hub/execute` with the execution payload. This has lower latency than pull, and is used primarily for agents on the same network.
+Secondary mechanism. If an agent's `executor_host` is set and reachable, the hub POSTs to `http://{executor_host}/agent-hub/execute` with the execution payload. **Push requests are HMAC-signed** using a shared secret derived from the project API key (`HMAC-SHA256(api_key, execution_id + timestamp)`). The SDK verifies this signature before executing to prevent injection of fake executions.
 
 ### 4.4 Leader Election (for HA)
 
-When running multiple hub instances, only one scheduler should be active. Leader election uses PostgreSQL advisory locks (`pg_advisory_lock`), following the River pattern:
+When running multiple hub instances, only one scheduler should be active. Leader election uses PostgreSQL advisory locks, following the River pattern:
 
 ```sql
--- Non-blocking try-lock
-SELECT pg_try_advisory_lock(42);  -- returns true if acquired
+-- Non-blocking try-lock with namespaced key (avoids collision)
+SELECT pg_try_advisory_lock(hashtext('agent_hub_scheduler'));
 ```
 
 The instance that holds the lock runs the scheduler tick. If the instance crashes, the lock is released and another instance acquires it. No external coordinator needed.
+
+On leader failover, the new leader re-evaluates all state from PostgreSQL. The in-memory long-poll waiter map is lost — SDKs get a connection error from the dead leader and reconnect to another instance (requires SDK config `serverUrls: string[]` for failover).
+
+### 4.5 Scale Boundaries & Target
+
+This design is validated for:
+- **Up to 100 agents** across ~5 projects
+- **Up to 1000 executions/day**
+- **Up to 10 concurrent running executions**
+- **Up to 50,000 traces/day**
+- **30-day trace retention, ~10 GB DB**
+
+For scale beyond this, or for multi-step workflow orchestration (3+ sequential steps), see Section 14 for Temporal migration criteria.
 
 ---
 
@@ -378,17 +516,18 @@ The instance that holds the lock runs the scheduler tick. If the instance crashe
 
 ### 5.1 Common SDK Layers
 
-All three language SDKs (TypeScript, Go, Python) provide the same three-layer API:
+All three language SDKs (TypeScript, Go, Python) provide the same four-layer API:
 
 ```
-Layer 1: Registration   — register agent spec with the hub
-Layer 2: Execution      — pull jobs, execute handlers, heartbeat, report results
-Layer 3: Instrumentation — auto-capture LLM traces
+Layer 1: Registration      — register agent spec with the hub
+Layer 2: Execution         — pull jobs, execute handlers, heartbeat, report results
+Layer 3: Instrumentation   — auto-capture LLM traces
+Layer 4: Agent Triggering  — trigger other agents with dedup and depth control
 ```
 
 ### 5.2 TypeScript SDK
 
-**Package:** `@agent-hub/sdk` (published to npm, or workspace reference)
+**Package:** `@agent-hub/sdk`
 
 **Dependencies:** zero required (uses built-in `fetch` in Node 20+), optional `@anthropic-ai/sdk` / `openai` for auto-instrumentation.
 
@@ -397,6 +536,7 @@ import { AgentHubClient } from '@agent-hub/sdk';
 
 const hub = new AgentHubClient({
   serverUrl: 'http://agent-hub.internal:8787',
+  // For HA: serverUrls: ['http://hub1:8787', 'http://hub2:8787'],
   project: 'llm-wiki',
   apiKey: process.env.AGENT_HUB_API_KEY,
 });
@@ -417,8 +557,11 @@ hub.register({
   retryMax: 3,
 });
 
-// Layer 2: Define handler
+// Layer 2: Define handler — receives cancellation signal via ctx.signal (AbortSignal)
 hub.handle('llm_extract_handler', async (ctx) => {
+  // Check for cancellation (from timeout or operator cancel)
+  if (ctx.signal.aborted) return { cancelled: true };
+
   await ctx.log('Starting extraction...');
   await ctx.progress(0.3, 'Fetching source...');
 
@@ -429,13 +572,24 @@ hub.handle('llm_extract_handler', async (ctx) => {
       { role: 'system', content: 'Extract structured knowledge from the source.' },
       { role: 'user', content: ctx.payload.source_text },
     ],
-    // ↑ This single call automatically records in the traces table:
-    //   - input_content (full messages)
-    //   - output_content (full response)
-    //   - model, provider
-    //   - input_tokens, output_tokens (from response headers)
-    //   - latency_ms
+    signal: ctx.signal,  // propagates cancellation to LLM call
   });
+
+  // Layer 4: Trigger another agent (fire-and-forget by default)
+  await ctx.trigger('sync_wiki', {
+    payload: { source_id: ctx.payload.source_id },
+    idempotencyKey: `extract-sync-${ctx.payload.source_id}`,
+  });
+
+  // Or trigger multiple agents with concurrency control
+  const results = await ctx.triggerBatch(
+    sources.map(s => ({
+      agent: 'llm_extract',
+      payload: { source_id: s.id },
+      idempotencyKey: `batch-extract-${s.id}`,
+    })),
+    { concurrency: 5 }
+  );
 
   // Manual tracing for non-LLM operations
   const span = ctx.trace.startSpan('save_to_database');
@@ -449,21 +603,16 @@ hub.handle('llm_extract_handler', async (ctx) => {
   return { entities: response.entities };
 });
 
-// Start pulling jobs and executing
 await hub.start();
 ```
 
-**Auto-instrumentation support:**
-- `ctx.llm.chat()` — generic LLM call (works with any OpenAI-compatible API)
-- `ctx.llm.anthropic()` — Claude-specific (captures tool_use blocks)
-- `ctx.llm.openai()` — OpenAI-specific (captures function calls)
+**Cancellation signal:** Every handler receives `ctx.signal` (an `AbortSignal`). The SDK creates an `AbortController` and aborts it when:
+- The handler exceeds `timeout_seconds` (SDK-enforced, independent of hub TimeoutChecker)
+- The hub sends a cancel signal (poll returns `{type: 'cancel', execution_id: '...'}`)
 
-If the project uses the Anthropic SDK or OpenAI SDK directly, they can also use a **patch function**:
-```typescript
-import { patchAnthropic } from '@agent-hub/sdk/anthropic';
-const client = patchAnthropic(new Anthropic(), hub.currentExecution);
-// Now all client.messages.create() calls are auto-traced
-```
+After aborting, the SDK waits a grace period (5s), then force-terminates and reports `failed` with `error_message: 'Force-terminated after timeout/cancel'`.
+
+**Version header:** Every SDK request includes `Agent-Hub-Version: 1`. The hub responds with the same header. If the hub returns a higher major version, the SDK warns but continues. If a lower major version, the SDK errors on startup. API changes within a major version are additive-only (new fields optional, new endpoints additive).
 
 ### 5.3 Go SDK
 
@@ -480,11 +629,16 @@ import (
     agenthub "github.com/emosama/agent-hub-sdk-go"
 )
 
-type DeepResearchHandler struct{}
-
-func (h *DeepResearchHandler) Handle(ctx agenthub.Context, job *agenthub.Job) error {
+func handleDeepResearch(ctx agenthub.Context, job *agenthub.Job) error {
     ctx.Log("Starting deep research on %s", job.Payload["repo_name"])
-    
+
+    // Check for cancellation
+    select {
+    case <-ctx.Done():
+        return ctx.Done().Err()
+    default:
+    }
+
     // LLM call — auto-traced
     resp, err := ctx.LLM().Chat(ctx, agenthub.ChatRequest{
         Model: "deepseek-v4-pro",
@@ -496,11 +650,14 @@ func (h *DeepResearchHandler) Handle(ctx agenthub.Context, job *agenthub.Job) er
     if err != nil {
         return err
     }
-    
-    return ctx.Report(agenthub.Result{
-        Summary: "Research completed",
-        Data:    resp.Content,
+
+    // Trigger another agent
+    ctx.Trigger("enrich_repo", agenthub.TriggerOpts{
+        Payload:         map[string]interface{}{"repo_id": job.Payload["repo_id"]},
+        IdempotencyKey:  fmt.Sprintf("research-enrich-%s", job.Payload["repo_id"]),
     })
+
+    return ctx.Report(agenthub.Result{Summary: "Research completed", Data: resp.Content})
 }
 
 func main() {
@@ -509,28 +666,27 @@ func main() {
         Project:   "oph",
         APIKey:    os.Getenv("AGENT_HUB_API_KEY"),
     })
-    
-    // Layer 1: Registration
+
     client.Register(agenthub.AgentSpec{
-        Name:         "deep_research",
-        DisplayName:  "Deep Research",
-        AgentType:    agenthub.AgentTypeLLM,
-        Cron:         "0 */2 * * *",
-        Handler:      "deep_research_handler",
-        Concurrency:  3,
-        TimeoutSecs:  600,
-        RetryMax:     2,
+        Name:        "deep_research",
+        DisplayName: "Deep Research",
+        AgentType:   agenthub.AgentTypeLLM,
+        Cron:        "0 */2 * * *",
+        Handler:     "deep_research_handler",
+        Concurrency: 3,
+        TimeoutSecs: 600,
+        RetryMax:    2,
     })
-    
-    // Layer 2: Handler binding (Asynq-style ServeMux)
+
     mux := agenthub.NewServeMux()
-    mux.HandleFunc("deep_research_handler", (&DeepResearchHandler{}).Handle)
-    mux.HandleFunc("enrich_repo_handler", handleEnrichRepo)
-    
-    // Start pull loop
+    mux.HandleFunc("deep_research_handler", handleDeepResearch)
+
+    // Run blocks, pulling jobs via long-poll
     client.Run(context.Background(), mux)
 }
 ```
+
+**Panic recovery:** The `ServeMux` dispatcher recovers panics via `defer/recover`, converts to an error result, and reports execution as `failed` with `error_message` from the panic and `error_stack` from `debug.Stack()`.
 
 ### 5.4 Python SDK
 
@@ -539,7 +695,8 @@ func main() {
 **Dependencies:** `httpx` (async HTTP), optional `openai` / `anthropic` for auto-instrumentation.
 
 ```python
-from agent_hub_sdk import AgentHubClient, agent, llm
+from agent_hub_sdk import AgentHubClient, agent
+import asyncio
 
 hub = AgentHubClient(
     server_url="http://agent-hub.internal:8787",
@@ -547,21 +704,22 @@ hub = AgentHubClient(
     api_key=os.environ["AGENT_HUB_API_KEY"],
 )
 
-# Layer 1: Decorator-based registration (Prefect/Celery style)
 @agent(
     name="llm_synthesize",
     display_name="LLM Synthesis",
     agent_type="llm_agent",
-    cron="0 0 */2 * *",  # every 2 days
+    cron="0 0 */2 * *",
     concurrency=1,
     timeout_seconds=600,
     retry_max=2,
 )
 async def llm_synthesize(ctx):
     await ctx.log("Starting synthesis...")
-    await ctx.progress(0.5, "Calling LLM...")
-    
-    # Layer 3: Auto-traced LLM call
+
+    # ctx.cancelled is an asyncio.Event set on timeout/cancel
+    if ctx.cancelled.is_set():
+        return {"cancelled": True}
+
     response = await ctx.llm.chat(
         model="deepseek-v4-pro",
         messages=[
@@ -569,25 +727,42 @@ async def llm_synthesize(ctx):
             {"role": "user", "content": ctx.payload["combined_text"]},
         ],
     )
-    
+
+    # Trigger downstream agent
+    await ctx.trigger("sync_wiki", payload={"source": ctx.payload["source"]})
+
     return {"synthesis": response.content}
 
-# Start the pull loop
 await hub.start()
 ```
 
 ### 5.5 SDK-Hub Protocol
 
-All SDKs communicate with the hub over HTTP. The protocol has 4 endpoints:
+All SDKs communicate with the hub over HTTP. All requests include `Agent-Hub-Version: 1` header.
 
 | Endpoint | Method | Purpose | Called By |
 |----------|--------|---------|-----------|
 | `/api/registry/agents` | PUT | Register/update agent spec | SDK on startup |
-| `/api/executors/heartbeat` | POST | Send heartbeat with optional progress | SDK every 10s |
-| `/api/executors/poll` | GET | Long-poll for pending executions | SDK in pull loop |
-| `/api/executions/:id/report` | POST | Report execution result + traces batch | SDK on completion |
+| `/api/registry/agents/:name` | DELETE | Deregister an agent | SDK on shutdown |
+| `/api/executors/heartbeat` | POST | Send heartbeat with progress for running executions | SDK every 10s |
+| `/api/executors/poll` | GET | Long-poll for pending executions (30s timeout) | SDK in pull loop |
+| `/api/executions/:id/report` | POST | Report execution result + trace_count_expected | SDK on completion |
+| `/api/executions/:id/traces` | POST | Append trace records (batch, max 100 per request) | SDK during execution |
 
-**Authentication:** `Authorization: Bearer <api_key>` header on all requests. The API key is hashed (SHA-256) and stored in `projects.api_key_hash`.
+**Authentication:** `Authorization: Bearer <api_key>` header on all requests. API key is SHA-256 hashed and stored in `projects.api_key_hash`.
+
+**Error codes for SDK retry behavior:**
+
+| Status | Meaning | SDK Behavior |
+|--------|---------|-------------|
+| `200/201` | Success | Process response |
+| `204` | No pending work (poll) | Re-poll immediately |
+| `400` | Bad request | Log error, do not retry |
+| `401/403` | Auth failure | Log error, exit process |
+| `409` | Conflict (e.g., trigger_depth exceeded) | Return error to caller |
+| `429` | Rate limited | Retry with backoff |
+| `503` | Hub unhealthy | Retry with backoff (1s, 2s, 4s...) |
+| Connection error | Network down | Retry with backoff; heartbeat skips silently; poll retries |
 
 ### 5.6 SDK Internals (Shared)
 
@@ -602,24 +777,37 @@ Each SDK runs an internal loop:
 │                                        │
 │  2. Heartbeat goroutine (every 10s)    │
 │     POST /api/executors/heartbeat      │
-│     (includes progress for running     │
-│      executions)                       │
+│     On network error: skip silently    │
+│     On 500: log warn, skip             │
+│     (next heartbeat in 10s will retry) │
 │                                        │
 │  3. Main loop:                         │
 │     GET /api/executors/poll            │
 │     (long-poll, up to 30s timeout)     │
 │                                        │
+│     204 → re-poll immediately          │
+│     Connection error → backoff retry   │
+│     5min continuous failures → log error│
+│                                        │
 │     If execution received:             │
 │     ├── Lookup handler by name         │
-│     ├── Run handler                    │
+│     ├── Create AbortController/cancel  │
+│     ├── Run handler with signal        │
 │     │   └── (LLM calls auto-traced)    │
+│     │   └── (ctx.trigger/triggerBatch) │
+│     ├── On panic/throw: recover,       │
+│     │   flush traces, report failed    │
 │     ├── Flush trace batch              │
 │     └── POST /api/executions/:id/report│
+│         On network error: buffer       │
+│         locally, retry on next poll    │
 │                                        │
 │  4. Graceful shutdown:                 │
 │     - Stop pulling new jobs            │
-│     - Finish in-flight execution       │
-│     - Deregister agents                │
+│     - Signal cancellation to running   │
+│       handlers, wait grace period (5s) │
+│     - Flush remaining traces           │
+│     - DELETE /api/registry/agents/:name│
 └────────────────────────────────────────┘
 ```
 
@@ -634,39 +822,52 @@ Each SDK runs an internal loop:
 | `PUT` | `/api/registry/agents` | Register/update agent(s) for a project |
 | `DELETE` | `/api/registry/agents/:name` | Deregister an agent |
 | `GET` | `/api/executors/poll` | Long-poll for pending executions |
-| `POST` | `/api/executors/heartbeat` | Executor heartbeat + progress |
+| `POST` | `/api/executors/heartbeat` | Executor heartbeat + running execution progress |
 | `POST` | `/api/executions/:id/report` | Report execution result |
 | `POST` | `/api/executions/:id/traces` | Append trace records (batch) |
-| `POST` | `/api/agents/:name/trigger` | Trigger an agent manually (for OPH steward, etc.) |
+| `POST` | `/api/agents/:name/trigger` | Trigger an agent (full protocol in Section 8) |
 
 ### 6.2 Dashboard API (for React frontend)
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/health` | Health check (DB connectivity, scheduler status) |
+| `GET` | `/api/metrics` | Prometheus-compatible metrics (queue depth, active execs, tick latency) |
 | `GET` | `/api/projects` | List all projects with agent counts, health summary |
 | `GET` | `/api/agents` | List agents with filters (project, type, status, labels) |
-| `GET` | `/api/agents/:id` | Agent detail with stats, last 10 execution status dots |
-| `PATCH` | `/api/agents/:id` | Update agent (enable/disable, change cron, change concurrency) |
+| `GET` | `/api/agents/:id` | Agent detail: stats, next run time, last 10 status dots |
+| `GET` | `/api/agents/:id/schedule-preview` | Next N (default 10) expected run times |
+| `PATCH` | `/api/agents/:id` | Update agent (enable/disable, change cron, concurrency) |
+| `PATCH` | `/api/agents/bulk` | Bulk update agents (enable/disable by project, etc.) |
+| `GET` | `/api/executors` | List all unique executor hosts with status, last seen |
 | `GET` | `/api/executions` | Paginated execution list with filters |
-| `GET` | `/api/executions/:id` | Execution detail (timing, result, input/output) |
+| `GET` | `/api/executions/:id` | Execution detail (timing, result, traces summary) |
 | `GET` | `/api/executions/:id/traces` | All traces for an execution (nested tree) |
+| `GET` | `/api/executions/:id/trigger-chain` | Walk trigger chain up/down (recursive CTE) |
 | `POST` | `/api/executions/:id/cancel` | Cancel a running execution |
-| `GET` | `/api/stats` | Aggregate stats (success rate, avg latency, queue depth) |
+| `GET` | `/api/stats` | Pre-aggregated stats (failure rate, avg latency, queue depth) |
+| `GET` | `/api/alerts` | Recent alert log entries |
 | `GET` | `/api/ws` | WebSocket upgrade for real-time updates |
 
 ### 6.3 WebSocket Events
-
-The hub pushes these events to the dashboard:
 
 ```typescript
 type WsEvent =
   | { type: 'agent.updated'; agent: Agent }
   | { type: 'execution.created'; execution: Execution }
-  | { type: 'execution.updated'; execution: Execution }  // status change
-  | { type: 'trace.appended'; executionId: string; trace: Trace }
+  | { type: 'execution.updated'; execution: Execution }
+  | { type: 'execution.triggered'; execution: Execution; triggeredBy: { executionId: string; agentName: string } }
+  | { type: 'trace.appended'; executionId: string; trace: Trace; lastActivityAt: string }
   | { type: 'heartbeat.received'; agentId: string; progress?: ProgressUpdate }
+  | { type: 'alert.fired'; alert: Alert }
   | { type: 'scheduler.tick'; stats: SchedulerStats };
 ```
+
+### 6.4 Dashboard Authentication
+
+Dashboard access requires HTTP Basic Auth. Password is hashed (bcrypt) and stored in `projects.dashboard_password_hash`. This is minimal but sufficient for the single-operator, internal-network deployment model. Upgrade path to JWT with role-based scopes in Phase 5.
+
+Agent-to-agent trigger authorization: see Section 8.3.
 
 ---
 
@@ -676,224 +877,367 @@ type WsEvent =
 
 ```
 Left Sidebar Navigation:
-├── 📊 Overview        — aggregate stats, recent activity, health overview
-├── 🤖 Agents           — agent CRUD, cron management, status toggles
-├── 📋 Executions       — execution history with filters
-│   └── Execution Detail — timeline, traces, logs
+├── 📊 Overview        — aggregate stats, recent activity, health overview, active alerts
+├── 🤖 Agents           — agent CRUD, cron management, status toggles, schedule preview
+├── 📋 Executions       — execution history with filters, trigger chain drill-down
+│   └── Execution Detail — timeline, LLM traces (expandable), logs
 ├── 📈 Analytics        — success rates, latency distributions, cost trends
-└── ⚙️ Settings         — projects, API keys, retention config
+├── 🔔 Alerts           — alert history, rule status
+└── ⚙️ Settings         — projects, API keys, provider pricing, retention config
 ```
 
 ### 7.2 Key Views (from UI Research)
 
 **Agents List** — reference: xxl-job task management + Argo cron dots
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Agents                                    [+ Register New Agent]     │
-│                                                                      │
-│ Filters: [Project ▾] [Type ▾] [Status ▾]  Search: [___________]     │
-│                                                                      │
-│ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ Project │ Agent         │ Cron         │ Status  │ Last 10   │ ⚙│ │
-│ ├─────────┼───────────────┼──────────────┼─────────┼───────────┼──┤ │
-│ │ llm-wiki│ llm_extract   │ 0 */6 * * *  │ 🟢 on   │ 🟢🟢🟢🔴🟢  │ →│ │
-│ │ OPH     │ deep_research │ 0 */2 * * *  │ 🟢 on   │ 🟢🟢🟢🟢🟢  │ →│ │
-│ │ OPH     │ relationship  │ 0 * * * *    │ 🟡 idle │ ⚪⚪⚪⚪⚪  │ →│ │
-│ │ llm-wiki│ sync_wiki     │ */15 * * * * │ 🔴 off  │ 🟢🟢🔴🔴—  │ →│ │
-│ └──────────────────────────────────────────────────────────────────┘ │
-│                                                                      │
-│ Status dots: 🟢 success 🔴 failed ⚪ no data — disabled              │
-└──────────────────────────────────────────────────────────────────────┘
-```
+Shows: project, agent name, cron expression, enabled toggle, executor status, last 10 execution status dots (🟢 success, 🔴 failed, ⚪ no data, — disabled), next expected run time.
 
 **Execution Detail** — reference: Temporal Timeline + LangFuse Trace Tree
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Execution: llm_extract #482                          ← Back to list  │
-│                                                                      │
-│ Status: ✅ Success    Duration: 2.3s    Trigger: cron (06:00)       │
-│ Agent: llm-wiki/llm_extract    Executor: 10.0.1.5:9191              │
-│                                                                      │
-│ ┌─ Timeline ──────────────────────────────────────────────────────┐ │
-│ │                                                                  │ │
-│ │  06:00:00  ⬆ Execution created (queued)                         │ │
-│ │  06:00:01  ⬆ Dispatched to executor                             │ │
-│ │  06:00:01  ⬆ Execution started                                  │ │
-│ │                                                                  │ │
-│ │  ┌─ LLM Call #1 ──────────────────────────── 1.8s ────────────┐│ │
-│ │  │  Model: deepseek-v4-pro    Tokens: 1,234→456   Cost: $0.003 ││ │
-│ │  │                                                              ││ │
-│ │  │  System Prompt                   [expand ▸]                  ││ │
-│ │  │  User Message                    [expand ▸]                  ││ │
-│ │  │  Assistant Response              [expand ▸]                  ││ │
-│ │  │  ┌─ Tool Call: get_entity   0.3s ───────────────────────┐   ││ │
-│ │  │  │  Arguments: {"name": "OpenAI"}                        │   ││ │
-│ │  │  │  Result: {"type": "organization", ...}                │   ││ │
-│ │  │  └───────────────────────────────────────────────────────┘   ││ │
-│ │  └──────────────────────────────────────────────────────────────┘│ │
-│ │                                                                  │ │
-│ │  06:00:02  ⬆ Execution completed                                │ │
-│ │                                                                  │ │
-│ └──────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
-```
+Shows: status, duration, **last activity delta** ("last trace was 12s ago" — key for stuck-vs-slow diagnosis), trigger chain breadcrumb (cron → steward → deep_research), timeline with expandable LLM call spans (system prompt, user message, assistant response, tool calls with arguments and results).
 
-**Overview Dashboard** — reference: Sidekiq status cards + Dagster run timeline
+**Trigger Chain View** — new, from agent-to-agent stress-test
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Agent Cron Hub                                          [Auto-refresh]│
-│                                                                      │
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                │
-│ │ Projects │ │ Agents   │ │ Running  │ │ Failed   │                │
-│ │    2     │ │   12     │ │    3     │ │    1     │                │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘                │
-│                                                                      │
-│ ┌─ Queue Depth ───────────────────────────────────────────────────┐ │
-│ │  llm-wiki:  ▓▓▓░░░░░ 3 queued   OPH: ░░░░░░░░░ 0 queued        │ │
-│ └──────────────────────────────────────────────────────────────────┘ │
-│                                                                      │
-│ ┌─ Recent Executions ──────────────────────────────────────────────┐│
-│ │  Time     Agent            Status    Duration                     ││
-│ │  06:00    llm_extract      ✅        2.3s                         ││
-│ │  06:00    deep_research    🔄        45s (running)                ││
-│ │  05:45    sync_wiki        ✅        0.8s                         ││
-│ │  05:30    relationship     ❌        12s (timeout)                ││
-│ └──────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
-```
+Shows the full chain: root execution → intermediate agents → this execution, with status, duration, and expand/collapse. Uses `GET /api/executions/:id/trigger-chain?direction=both`.
+
+**Executor Health** — connection status, last heartbeat, active executions, poll latency. Green/yellow/red indicators per executor.
+
+### 7.3 Debugging Patterns (from operational stress-test)
+
+| Operator Question | Where to Look |
+|-------------------|--------------|
+| "Did anything fail overnight?" | Overview → Failed stat card → filtered execution list |
+| "Is it stuck or slow?" | Execution Detail → last activity delta; Timeline → most recent trace timestamp |
+| "Why did X fire?" | Execution Detail → Trigger Chain breadcrumb |
+| "Did my cron change take effect?" | Agent Detail → Next expected run time (computed live from `croner`) |
+| "Why isn't agent picking up jobs?" | Executor Health → connection status, last heartbeat, poll latency |
+| "Traces incomplete?" | Execution Detail → trace_count_expected vs trace_count_actual + `trace_incomplete` flag |
 
 ---
 
-## 8. Hub API for External Trigger
+## 8. Agent-to-Agent Trigger Protocol
 
-OPH steward or any external program can trigger an agent on-demand:
+### 8.1 Trigger Request
 
-```bash
-# Manual trigger with payload
-curl -X POST http://agent-hub.internal:8787/api/agents/deep_research/trigger \
-  -H "Authorization: Bearer <api_key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "triggered_by": "oph-steward",
-    "payload": {
-      "repo_id": "12345",
-      "repo_name": "anthropics/claude-code"
-    }
-  }'
+```
+POST /api/agents/:name/trigger
+Authorization: Bearer <api_key>
+Agent-Hub-Version: 1
+Content-Type: application/json
+
+{
+  "payload": { ... },                    // JSONB, validated against agent.input_schema
+  "idempotency_key": "unique-key",      // required for agent-to-agent triggers
+  "dedup_policy": "skip_if_running",    // skip_if_running | skip_if_exists | allow_duplicate
+  "sync": false,                        // false = fire-and-forget (default)
+                                        // true  = block until triggered execution completes
+  "sync_timeout_seconds": 300           // max wait for sync=true (default 5 min)
+}
 ```
 
-This creates an execution with `trigger_type='api'` and returns the execution ID. The execution then flows through the normal dispatch (pull or push).
+### 8.2 Trigger Response
+
+**`sync: false` (fire-and-forget, default):**
+```json
+// 202 Accepted
+{
+  "execution_id": "uuid",
+  "status": "queued",
+  "duplicate": false
+}
+
+// 200 OK (duplicate — idempotency key matched existing execution)
+{
+  "execution_id": "uuid",
+  "status": "running",
+  "duplicate": true
+}
+```
+
+**`sync: true` (blocking await):**
+```json
+// 200 OK (triggered execution completed)
+{
+  "execution_id": "uuid",
+  "status": "success",
+  "result_summary": "...",
+  "result_data": { ... },
+  "duration_ms": 2300
+}
+```
+
+### 8.3 Trigger Authorization
+
+Triggers are scoped to same-project by default. Cross-project triggers require:
+1. Target project's `allow_trigger_from` includes the caller's project ID
+2. Target agent's `allow_trigger_by` doesn't restrict this caller
+
+System agents (names prefixed `_hub_`) cannot be triggered via the external API.
+
+### 8.4 Trigger Depth Limit
+
+Every execution has `trigger_depth`. When agent A triggers B, B's `trigger_depth = A.trigger_depth + 1`. The hub rejects triggers where `trigger_depth >= 5` (configurable via `AGENT_HUB_MAX_TRIGGER_DEPTH`). Response: `409 Conflict` with `{"error": "trigger_depth_exceeded", "max_depth": 5}`.
+
+### 8.5 Idempotency & Dedup
+
+Idempotency keys are scoped to (agent, key) pairs. The hub checks for existing `queued` or `running` executions with the same key within `agent.idempotency_window_seconds` (default 1 hour).
+
+`dedup_policy` options:
+- `skip_if_running` (default): Return existing if queued/running. Create new if only terminal executions exist.
+- `skip_if_exists`: Return existing if ANY execution with this key exists (including success/failed). Only create if no execution has ever used this key.
+- `allow_duplicate`: Always create new execution.
+
+### 8.6 SDK Methods
+
+```typescript
+// Single trigger
+await ctx.trigger('deep_research', {
+  payload: { repo_id: '12345' },
+  idempotency_key: `cadence-repo-12345-${today()}`,
+});
+
+// Batch trigger with concurrency control
+await ctx.triggerBatch(
+  repos.map(r => ({
+    agent: 'discovery',
+    payload: { repo_id: r.id },
+    idempotency_key: `cadence-${r.id}-${today()}`,
+  })),
+  { concurrency: 5 }
+);
+```
+
+### 8.7 Trigger Chain Data
+
+When a trigger creates an execution, the hub sets:
+- `parent_execution_id` = triggering execution's ID
+- `root_execution_id` = triggering execution's `root_execution_id` ?? triggering execution's ID
+- `trigger_depth` = triggering execution's `trigger_depth + 1`
+- `idempotency_key` = from the trigger request
+- `input_payload` = from `payload` field
+
+The chain is traversable via `GET /api/executions/:id/trigger-chain?direction=up|down|both`, implemented as a recursive CTE on `parent_execution_id`.
 
 ---
 
-## 9. Implementation Phases
+## 9. Migration from Current agent-hub
 
-### Phase 1: Foundation (agent-hub core)
-- Clean up existing agent-hub codebase (remove agent discovery, mock runtime, etc.)
-- Set up PostgreSQL + Drizzle ORM migrations
-- Implement core tables: `projects`, `agents`, `executions`, `traces`
-- Build the scheduling engine (CronEvaluator, Matcher, HeartbeatMonitor, TimeoutChecker)
-- Hub API for agent registration and executor poll/heartbeat/report
-- **Estimated:** core infrastructure
+### 9.1 Strategy: Progressive, Agent-by-Agent
 
-### Phase 2: TypeScript SDK + OPH Migration (Go SDK)
-- Build `@agent-hub/sdk` (TypeScript)
-- Build `agent-hub-sdk-go` (Go) — priority since OPH uses Go
-- Migrate OPH agents to use Go SDK:
-  - `deep_research` (currently `agent-v5.mjs`) 
-  - `relationship_agent` (currently `agent-v6.mjs`)
-  - Worker enrich stage (LLM enrichment)
-  - Steward loop checks → triggered via API
-- **Estimated:** SDK development + OPH integration
+Instead of big-bang removal, the old and new hub run side-by-side during transition:
 
-### Phase 3: Dashboard
-- Agent list view with cron management
-- Execution history with filters
-- Execution detail with timeline + LLM trace viewer
-- Overview dashboard with stats and queue depth
-- Real-time WebSocket updates
-- **Estimated:** dashboard rebuild (reusing existing React infrastructure)
+1. Deploy new hub on a different port (e.g., 8788) with a blank PostgreSQL database
+2. Old hub continues running on port 8787, unchanged
+3. Register agents manually on the new hub via dashboard or `PUT /api/registry/agents`
+4. Migrate one agent at a time:
+   - Build SDK handler for the agent
+   - Register agent spec on new hub (with desired cron)
+   - Run in parallel with old execution for 2-3 days, compare results
+   - Disable old cron/scheduler for that agent, enable new hub cron
+5. Once all agents are migrated and stable, shut down the old hub
+6. Old dashboard remains available (read-only) for historical reference during transition
 
-### Phase 4: Python SDK + llm-wiki Migration
-- Build `agent-hub-sdk` (Python)
-- Migrate llm-wiki agents:
-  - `llm_extract` 
-  - `llm_synthesize`
-  - `refresh_source_channel`
-  - `sync_wiki`
-- **Estimated:** Python SDK + llm-wiki refactor
+### 9.2 What Gets Removed (after transition)
 
-### Phase 5: Production hardening
-- Multi-instance hub with leader election
-- Retention cleanup automation
-- Cost tracking aggregation
-- Alerting (Slack/email on failures)
-- API key management UI
-
----
-
-## 10. Migration from Current agent-hub
-
-### 10.1 What Gets Removed
-
-The current agent-hub is a local agent discovery and monitoring tool. The following features are **out of scope** for the new system and will be removed in Phase 1:
-
-| Feature | Reason for Removal |
-|---------|-------------------|
-| Copilot CLI session discovery (`~/.copilot/session-state`) | No longer a local-only tool |
-| Claude Code session discovery (`~/.claude/projects`) | No longer a local-only tool |
-| Gemini CLI session discovery (`~/.gemini/tmp`) | No longer a local-only tool |
-| OpenClaw gateway discovery | No longer a local-only tool |
+| Feature | Reason |
+|---------|--------|
+| Copilot/Claude/Gemini/OpenClaw session discovery | No longer local-only tool |
 | Mock runtime / demo activity | Replaced by real agent registry |
-| Runtime bridges (Copilot SDK, Claude resume, Gemini resume) | Agents execute via SDK in their own projects |
+| Runtime bridges (Copilot SDK, Claude resume, Gemini resume) | Agents execute via SDK |
 | Inbox triage (acknowledge/snooze/mute) | Replaced by execution status management |
 | Workspace actions (open in Finder/Terminal) | Out of scope |
 | Reference catalog (curated GitHub projects) | Out of scope |
-| Desktop notifications | Replaced by alerting in Phase 5 |
-| Chinese/English UI switch | Not needed for v1; re-add later if needed |
 
-### 10.2 What Gets Kept (Repurposed)
+### 9.3 What Gets Kept (Repurposed)
 
 | Feature | Repurposed As |
 |---------|--------------|
 | Fastify + WebSocket server | Core hub server (API + WS + scheduler) |
-| React + Vite dashboard | New dashboard (reuse layout, WebSocket client, patterns) |
-| `packages/shared` contracts | Redesigned for agents/executions/traces schema |
-| `zod` validation patterns | Input validation for API endpoints |
-| `examples/reference-sidecar.mjs` | Reference example for TypeScript SDK usage |
-| SQLite → PostgreSQL migration pattern | Keep Drizzle, switch dialect |
-
-### 10.3 What Gets Added
-
-Everything in Sections 3-9 above: PostgreSQL schema, scheduling engine, SDK (TS/Go/Python), new dashboard views, external trigger API.
+| React + Vite dashboard | New dashboard shell |
+| `packages/shared` contracts | Redesigned for agents/executions/traces |
+| `zod` validation patterns | API input validation |
+| `examples/reference-sidecar.mjs` | Reference for TypeScript SDK usage |
+| Drizzle ORM setup | Switch dialect from SQLite to PostgreSQL |
 
 ---
 
-## 11. Open Decisions
+## 10. Implementation Phases
+
+### Phase 1: Foundation (hub core)
+
+- Clean up old code per Section 9.2
+- Set up PostgreSQL + Drizzle ORM migrations (all tables from Section 3)
+- Build scheduling engine (CronEvaluator with misfire support, Matcher, HeartbeatMonitor, TimeoutChecker, RetryManager)
+- Hub API: agent registry, executor poll/heartbeat/report, health/metrics endpoints
+- Dashboard auth (HTTP Basic)
+- **Delivers:** Manual trigger from dashboard, zero SDK needed. Agents can be registered and triggered manually while old cron still runs.
+
+### Phase 2: Go SDK + OPH Steward Decomposition
+
+- Build `agent-hub-sdk-go` (minimal: register, poll, heartbeat, report, trigger)
+- Decompose OPH steward into independent agents:
+  - `steward_backlog_prioritize` (llm_agent, `* * * * *`) — checks backlog, LLM ranks, triggers `deep_research`
+  - `steward_recover_stale` (cron_task, `* * * * *`) — re-queues stuck jobs
+  - `steward_cadence_reentry` (cron_task, `*/30 * * * *`) — checks due repos, triggers discovery
+  - `steward_scope_discovery` (cron_task, `0 0 * * *`) — regenerates discovery plans
+  - `steward_lint` (cron_task, `0 3 * * *`) — daily lint checks
+  - `steward_blob_retention` (cron_task, `0 4 * * *`) — cleans old blobs
+  - `steward_re_enrichment` (cron_task, `0 5 * * *`) — finds un-enriched repos
+  - `steward_signal_detection` (cron_task, `0 6 * * *`) — emits signal cards
+  - `steward_trend_generation` (cron_task, `0 7 * * *`) — weekly/monthly trends
+  - `steward_evidence_gaps` (cron_task, `0 */6 * * *`) — auto-heals relationships
+- Required steward-side infrastructure (see Section 11):
+  - DB-backed cooldowns (`agent_cooldowns` table)
+  - Repo-level dedup key on deep_analysis job enqueue
+  - LLM prioritization cooldown (separate from tick interval)
+  - Lint orphan dedup check
+  - Discovery cross-agent dedup query
+- Migrate `deep_research`, `relationship_agent`, worker enrich stage
+- **Delivers:** All OPH agents running through hub, steward fully decomposed
+
+### Phase 3: Dashboard
+
+- Agents List with cron management, status dots, schedule preview
+- Execution history with filters and trigger chain drill-down
+- Execution detail with timeline + LLM trace viewer
+- Overview dashboard with stats, queue depth, connection health
+- Executor health view
+- Real-time WebSocket updates
+- Alert history view
+- **Delivers:** Full observability over all agents and executions
+
+### Phase 4: Python SDK + llm-wiki Migration
+
+- Build `agent-hub-sdk` (Python)
+- Create evaluator agent: `channel_refresh_evaluator` (replaces `runAutomationTick`)
+- Migrate llm-wiki agents one at a time:
+  - `refresh_source_channel` — scrape channel, discover URLs
+  - `ingest_source` — fetch and capture content
+  - `llm_extract` — LLM extraction (auto-chained via `ctx.trigger` after ingest)
+  - `llm_synthesize` — cross-source synthesis (manual/API trigger)
+  - `sync_wiki` — re-index wiki pages
+  - `discover_channels` — LLM-based channel discovery (manual)
+- Remove `src/worker.ts`, `requeueJobForRetry` (hub owns retry)
+- **Delivers:** All llm-wiki agents running through hub
+
+### Phase 5: Production Hardening
+
+- Multi-instance hub with leader election
+- Provider pricing table seeding (DeepSeek, Claude, OpenAI)
+- Alerting sinks (Slack webhook, email)
+- API key management UI
+- Retention cleanup automation
+- Content truncation/compression policy if needed
+- JWT dashboard auth (replace Basic Auth)
+
+---
+
+## 11. Steward Decomposition Reference
+
+This section documents the specific patterns needed to safely decompose OPH's 60s steward loop into 10 independent cron agents. These patterns are reusable for any project decomposing a monolithic scheduler loop.
+
+### 11.1 Required Infrastructure
+
+1. **DB-backed cooldowns** (`agent_cooldowns` table): Replaces volatile `time.Time` fields in the old steward struct. Each evaluator agent checks `WHERE last_run_at < now() - cooldown_duration` and upserts after completing.
+
+2. **Repo-level dedup key** on job enqueue (`dedupe_key TEXT` on the OPH job queue): `deep_analysis:{owner}/{repo}`. Before enqueuing, check `WHERE dedupe_key = $1 AND status IN ('queued','running') AND requested_at > now() - INTERVAL '6 hours'`. Prevents same-repo double-enqueue from different agents.
+
+3. **LLM prioritization cooldown** (10 minutes, separate from tick interval): `steward_backlog_prioritize` only calls the LLM prioritizer when `len(candidates) > availableSlots * 3` AND at least 10 minutes since last LLM prioritization call. Otherwise uses FIFO.
+
+4. **Cross-agent discovery dedup**: Before enqueuing `StageDiscovery`, check if any active discovery run already covers the same policy/trigger ref.
+
+5. **Shared event log**: All steward agents write significant events to a `steward_events` table (or use execution-level `result_data`). The operator console queries across all steward agents to reconstruct "what did the system do recently."
+
+### 11.2 Known Risks & Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| Orphan repos double-enqueued (backlog + lint) | Lint checks activeRepos before enqueuing (Fix 4) |
+| TOCTOU on slot reservation | Atomic slot check via `active_execution_count` counter (Fix 3) |
+| Cooldowns reset on agent restart | DB-backed cooldowns (Fix 2) |
+| LLM cost explosion on backfill | 10-min LLM cooldown + backlog size threshold (Fix 5) |
+| Discovery flooding (cadence + scope) | Cross-agent discovery dedup query (Fix 6) |
+| Double signal cards on restart | DB cooldown + signal ID dedup check (Fix 8) |
+| Empty trends (signal detection hasn't run) | Freshness check: skip trend if no signals in 48h (Fix 9) |
+
+---
+
+## 12. Open Decisions
 
 These are deferred to the implementation plan stage:
 
 1. **PostgreSQL connection:** netease-pub PostgreSQL host/port/credentials setup
-2. **Auth model:** API key per project? Per agent? Shared secret?
-3. **Multi-tenancy:** Is there a concept of "organization" above project?
-4. **Dashboard tech:** Keep existing React + Vite? Migrate to something else?
+2. **Auth model — resolved:** One API key per project for SDK auth. Dashboard uses HTTP Basic Auth (upgrade to JWT in Phase 5).
+3. **Multi-tenancy — resolved:** No "organization" concept in v1. Projects are the top-level scope. Cross-project trigger auth via `allow_trigger_from`.
+4. **Dashboard tech — resolved:** Keep existing React + Vite shell, rebuild views.
 5. **Deployment:** Docker compose on netease-pub? Systemd? Separate VM?
-6. **Existing code cleanup:** How much of the current agent-hub (agent discovery, Copilot/Claude/Gemini bridging) to keep vs. remove?
+6. **Existing code cleanup — resolved:** Progressive migration (Section 9). Old+new hubs coexist during transition.
 
 ---
 
-## 12. References
+## 13. Alerting Rules
+
+Evaluated by the scheduler's AlertEvaluator every 10 seconds. Severity: `critical` (immediate operator attention) / `warning` (dashboard highlight) / `info` (stats only).
+
+### Critical
+
+| # | Rule | Condition |
+|---|------|-----------|
+| 1 | **Agent offline** | `executor_status = 'online'` AND `last_heartbeat_at < now() - 60s` |
+| 2 | **Failure rate spike** | `COUNT(status='failed') / COUNT(*) > 0.5` over last 1h per agent, `COUNT(*) >= 4` |
+| 3 | **Queue depth anomaly** | `COUNT(status='queued') > 10` for single agent, sustained >5 min |
+| 4 | **Timeout cascade** | `COUNT(status='timeout') > 3` in last 30 min for same agent |
+
+### Warning
+
+| # | Rule | Condition |
+|---|------|-----------|
+| 5 | **Retries exhausted** | `retry_count >= retry_max` on any recent execution |
+| 6 | **Consecutive failures** | Last 3 executions for an agent all `failed` |
+| 7 | **Registered but never executed** | `enabled=true`, `cron_expression IS NOT NULL`, `last_execution_at IS NULL` for >1h |
+| 8 | **Cost anomaly** | `SUM(cost_estimate)` for single execution exceeds $5.00 |
+
+### Info
+
+| # | Rule | Condition |
+|---|------|-----------|
+| 9 | **Retention cleanup executed** | Log rows deleted |
+| 10 | **Scheduler tick latency** | Tick duration >1s |
+
+Alert dispatch uses a pluggable `AlertSink` interface. Phase 1: WebSocket broadcast + `alert_log` table. Phase 5: Slack webhook, email.
+
+---
+
+## 14. Scale Boundaries & Temporal Migration Criteria
+
+This design is appropriate for the current and foreseeable scale. Move to Temporal (or similar durable execution platform) when **any** of these thresholds are crossed:
+
+| Metric | Threshold | Rationale |
+|--------|-----------|-----------|
+| Project count | >5 | Multi-tenancy and isolation become important |
+| Agent count | >100 | Cron evaluation loop becomes CPU-bound (1000 `croner.nextRun()` calls/sec) |
+| Executions/day | >5,000 | PostgreSQL write throughput starts mattering |
+| Concurrent executions | >50 | Matcher query with `FOR UPDATE SKIP LOCKED` becomes bottleneck |
+| Workflow complexity | >3 sequential steps per execution | Durable execution (Temporal's core strength) becomes valuable |
+| Trace volume | >200,000 traces/day | PG storage becomes cost-prohibitive; ClickHouse makes sense |
+
+**Why Temporal would be the migration target**: Temporal provides durable execution (survive process crashes mid-workflow), exactly-once execution guarantees, child workflow DAGs, SDKs in 7+ languages, and battle-tested operational maturity. The tradeoff is operational complexity: minimum 4 services (Frontend, Matching, History, DB) vs. our current 1 process + PG.
+
+**Until these thresholds are crossed, the single-process + PostgreSQL design is the right call.** Simplicity is a feature at this scale.
+
+---
+
+## 15. References
 
 | Project | URL | Relevance |
 |---------|-----|-----------|
-| xxl-job | https://github.com/xuxueli/xxl-job | Architecture reference |
-| Temporal | https://github.com/temporalio/temporal | Task Queue, Event Sourcing |
-| Prefect | https://github.com/PrefectHQ/prefect | Work Pool, State Machine |
+| xxl-job | https://github.com/xuxueli/xxl-job | Architecture, misfire policy, executor model |
+| Temporal | https://github.com/temporalio/temporal | Task Queue, Event Sourcing, child workflow pattern |
+| Prefect | https://github.com/PrefectHQ/prefect | Work Pool, state machine, decorator SDK, `wait_for` |
 | LangFuse | https://github.com/langfuse/langfuse | Trace data model |
-| River | https://github.com/riverqueue/river | Go PG job queue |
-| Asynq | https://github.com/hibiken/asynq | Go Redis job queue |
+| River | https://github.com/riverqueue/river | Go PG job queue, advisory lock leader election |
+| Asynq | https://github.com/hibiken/asynq | Go Redis job queue, ServeMux handler pattern |
 | croner | https://github.com/Hexagon/croner | TypeScript cron parser |
-| drizzle-orm | https://github.com/drizzle-team/drizzle-orm | TypeScript ORM |
+| drizzle-orm | https://github.com/drizzle-team/drizzle-orm | TypeScript ORM, PG support |
+| Airflow | https://github.com/apache/airflow | Grid View, TriggerDagRunOperator, pool/slot model |
+| Stripe | https://stripe.com/docs/api/idempotency | Idempotency key pattern |
