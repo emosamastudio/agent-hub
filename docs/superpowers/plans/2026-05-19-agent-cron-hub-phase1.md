@@ -186,7 +186,7 @@ export async function closePool(): Promise<void> {
 // apps/server/src/db/schema.ts
 import {
   pgTable, uuid, text, integer, timestamp, boolean,
-  jsonb, numeric, pgEnum, uniqueIndex, bigserial, primaryKey,
+  jsonb, numeric, pgEnum, uniqueIndex, bigserial, primaryKey, date,
 } from "drizzle-orm/pg-core";
 
 export const triggerTypeEnum = pgEnum("trigger_type", [
@@ -332,7 +332,7 @@ export const providerPricing = pgTable("provider_pricing", {
   model: text("model").notNull(),
   inputCostPer1k: numeric("input_cost_per_1k", { precision: 10, scale: 6 }).notNull(),
   outputCostPer1k: numeric("output_cost_per_1k", { precision: 10, scale: 6 }).notNull(),
-  effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+  effectiveFrom: date("effective_from").notNull(),
 });
 ```
 
@@ -922,7 +922,9 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
   // Skip auth for SDK endpoints (use API key instead)
   if (request.url.startsWith("/api/registry") ||
       request.url.startsWith("/api/executors") ||
-      request.url.startsWith("/api/executions/") && request.method === "POST") {
+      request.url.startsWith("/api/cooldowns") ||
+      request.url.startsWith("/api/executions/") && request.method === "POST" ||
+      request.url.startsWith("/api/agents/") && request.method === "POST") {
     return;
   }
 
@@ -960,7 +962,6 @@ import { TraceRepository } from "./repositories/trace-repository.js";
 import { registerRoutes } from "./http/routes.js";
 import { basicAuth } from "./middleware/auth.js";
 import { serverConfig } from "./config.js";
-import type { SqliteDatabase } from "./db/index.js"; // keep for migration reference only
 
 export interface AppContext {
   projectRepo: ProjectRepository;
@@ -969,7 +970,7 @@ export interface AppContext {
   traceRepo: TraceRepository;
 }
 
-export async function createApp() {
+export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const app = Fastify({ logger: true });
   await app.register(cors, { origin: true });
   await app.register(websocket);
@@ -1005,7 +1006,7 @@ export async function createApp() {
     await closePool();
   });
 
-  return app;
+  return { app, ctx };
 }
 ```
 
@@ -1018,21 +1019,21 @@ import { serverConfig } from "./config.js";
 import { startScheduler } from "./services/scheduler.js";
 
 async function main() {
-  const app = await createApp();
+  const { app, ctx: appCtx } = await createApp();
 
   // Startup recovery: align active_execution_count
-  const { AgentRepository } = await import("./repositories/agent-repository.js");
-  const { getPool, createDb } = await import("./db/connection.js");
-  const agentRepo = new AgentRepository(createDb(getPool()));
-  await agentRepo.resetAllExecutionCounts();
+  await appCtx.agentRepo.resetAllExecutionCounts();
 
   await app.listen({ host: serverConfig.host, port: serverConfig.port });
   console.log(`Agent Cron Hub listening on http://${serverConfig.host}:${serverConfig.port}`);
 
-  // Start scheduler after server is up
-  // (imported after app.listen to avoid blocking startup)
-  const ctx = { agentRepo, executionRepo: null as any, traceRepo: null as any };
-  // Full scheduler wiring done in Task 6
+  // Start scheduler — reuses the same repos created by createApp
+  const { startScheduler } = await import("./services/scheduler.js");
+  startScheduler({
+    agentRepo: appCtx.agentRepo,
+    executionRepo: appCtx.executionRepo,
+    traceRepo: appCtx.traceRepo,
+  });
 }
 
 main().catch((err) => {
@@ -1072,7 +1073,7 @@ git commit -m "refactor: rewrite config, app, and index for new PostgreSQL-backe
 
 ```typescript
 // apps/server/src/services/scheduler.ts
-import { croner } from "croner";
+import { Cron } from "croner";
 import type { AgentRepository } from "../repositories/agent-repository.js";
 import type { ExecutionRepository } from "../repositories/execution-repository.js";
 import type { TraceRepository } from "../repositories/trace-repository.js";
@@ -1081,7 +1082,7 @@ import { agents } from "../db/schema.js";
 
 type CronerInstance = ReturnType<typeof croner>;
 
-interface SchedulerContext {
+export interface SchedulerContext {
   agentRepo: AgentRepository;
   executionRepo: ExecutionRepository;
   traceRepo: TraceRepository;
@@ -1126,7 +1127,7 @@ async function cronEvaluator(ctx: SchedulerContext) {
   const enabledAgents = await ctx.agentRepo.findEnabledWithCron();
   for (const agent of enabledAgents) {
     if (!agent.cronExpression) continue;
-    const cron = croner(agent.cronExpression);
+    const cron = new Cron(agent.cronExpression);
     const lastRun = agent.lastExecutionAt ?? new Date(0);
     const nextRun = cron.nextRun(lastRun);
     if (!nextRun || nextRun > new Date()) continue;
@@ -1152,9 +1153,11 @@ async function cronEvaluator(ctx: SchedulerContext) {
         triggerDepth: 0,
       });
     } else if (agent.misfirePolicy === "fire_all") {
-      // Create up to availableSlots executions for missed windows
+      // Cap lookback to 1 hour — prevents spinning through ~29M iterations
+      // from epoch 1970 when lastExecutionAt is NULL for new agents.
+      const maxLookback = new Date(Date.now() - 60 * 60 * 1000);
+      let cursor = new Date(Math.max(lastRun.getTime() + 1, maxLookback.getTime()));
       let toCreate = 0;
-      let cursor = new Date(lastRun.getTime() + 1);
       while (toCreate < availableSlots) {
         const next = cron.nextRun(cursor);
         if (!next || next > new Date()) break;
@@ -1252,18 +1255,9 @@ async function retentionCleanup(ctx: SchedulerContext) {
 }
 ```
 
-- [ ] **Step 2: Wire scheduler into index.ts**
+- [ ] **Step 2: Verify scheduler wiring in index.ts**
 
-Update `apps/server/src/index.ts`:
-```typescript
-// After app.listen:
-const ctx: SchedulerContext = {
-  agentRepo,
-  executionRepo,
-  traceRepo,
-};
-startScheduler(ctx);
-```
+The scheduler is already wired in Task 5 Step 4's `index.ts`: `createApp()` returns `{ app, ctx }`, and `main()` calls `startScheduler()` with `appCtx.agentRepo/executionRepo/traceRepo`. No separate wiring step needed — verify the import paths match.
 
 - [ ] **Step 3: Commit**
 
@@ -1289,7 +1283,6 @@ import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
 import { z } from "zod";
 import { serverConfig } from "../config.js";
-import type { SchedulerContext } from "../services/scheduler.js";
 
 const agentSpecSchema = z.object({
   name: z.string().min(1),
@@ -1307,7 +1300,7 @@ const agentSpecSchema = z.object({
   maxTurns: z.number().int().optional(),
   maxCostUsd: z.number().optional(),
   executorHost: z.string().optional(),
-  allowTriggerBy: z.record(z.unknown()).optional(),
+  allowTriggerBy: z.record(z.unknown()).nullable().optional(),
   labels: z.record(z.string()).optional(),
 });
 
@@ -1469,6 +1462,10 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
     const durationMs = exec.startedAt ? Date.now() - new Date(exec.startedAt).getTime() : null;
 
+    // Compute trace_incomplete before status update (avoid double-write)
+    const traceIncomplete = body.trace_count_expected !== undefined
+      && (exec.traceCountActual ?? 0) < body.trace_count_expected;
+
     await ctx.executionRepo.updateStatus(id, body.status, {
       finishedAt: new Date(),
       durationMs,
@@ -1477,17 +1474,8 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
       errorMessage: body.error_message ?? null,
       errorStack: body.error_stack ?? null,
       traceCountExpected: body.trace_count_expected ?? null,
-    });
-
-    // Check trace completeness
-    if (body.trace_count_expected !== undefined) {
-      const actualExec = await ctx.executionRepo.findById(id);
-      if (actualExec && (actualExec.traceCountActual ?? 0) < body.trace_count_expected) {
-        await ctx.executionRepo.updateStatus(id, body.status, {
-          traceIncomplete: true,
-        } as any);
-      }
-    }
+      traceIncomplete,
+    } as any);
 
     // Decrement active count
     await ctx.agentRepo.decrementExecutionCount(exec.agentId);
@@ -1533,9 +1521,11 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     const body = triggerSchema.parse(request.body);
     const projectId = getProjectId(request);
 
-    // Resolve X-Execution-ID for agent-to-agent triggers
+    // Resolve trigger source: X-Trigger-Source header (dashboard → manual),
+    // X-Execution-ID header (agent → agent), otherwise (SDK/cURL → api)
     const parentExecId = request.headers["x-execution-id"] as string | undefined;
-    let triggerType: "api" | "agent" = "api";
+    const triggerSource = request.headers["x-trigger-source"] as string | undefined;
+    let triggerType: "manual" | "api" | "agent" = triggerSource === "dashboard" ? "manual" : "api";
     let parentExecution: any = null;
     let rootExecutionId: string | null = null;
     let triggerDepth = 0;
@@ -1559,15 +1549,10 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
       return reply.status(409).send({ error: "trigger_depth_exceeded", max_depth: serverConfig.maxTriggerDepth });
     }
 
-    // Idempotency check
-    if (body.idempotency_key) {
-      const existing = await ctx.executionRepo.findAll({
-        agentId: undefined as any, // would need agent lookup first
-        status: "queued",
-        limit: 1,
-      });
-      // Simplified: full idempotency check in production code
-    }
+    // Idempotency check (Phase 1 stub — full impl in Phase 5 with unique index on
+    // executions(agent_id, idempotency_key) WHERE status IN ('queued','running'))
+    // In Phase 1, the idempotency_key is stored but not enforced. Accept the
+    // race window; dedup_policy is passed through but ignored.
 
     // Find target agent
     const targetAgent = await ctx.agentRepo.findByProjectAndName(projectId, name);
@@ -1708,7 +1693,7 @@ Add these routes inside `registerRoutes()` after the SDK-facing endpoints:
   app.get("/api/agents/:id/schedule-preview", async (request) => {
     const agent = await ctx.agentRepo.findById((request.params as any).id);
     if (!agent || !agent.cronExpression) return { runs: [] };
-    const cron = croner(agent.cronExpression);
+    const cron = new Cron(agent.cronExpression);
     const now = new Date();
     const previews = [];
     let cursor = now;
@@ -1855,7 +1840,11 @@ export async function patchAgent(id: string, body: Record<string, unknown>) {
 export async function triggerAgent(name: string, payload: unknown) {
   const res = await fetch(`/api/agents/${name}/trigger`, {
     method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "X-Trigger-Source": "dashboard",
+    },
     body: JSON.stringify({ payload }),
   });
   return res.json();
