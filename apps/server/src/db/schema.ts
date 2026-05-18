@@ -1,171 +1,151 @@
-import type { SqliteDatabase } from "./index.js";
+import {
+  pgTable, uuid, text, integer, timestamp, boolean,
+  jsonb, numeric, pgEnum, bigserial, primaryKey, date,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
-export function applySchema(db: SqliteDatabase): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      platform TEXT NOT NULL,
-      workspace_path TEXT NOT NULL,
-      state TEXT NOT NULL,
-      health TEXT NOT NULL,
-      attention TEXT NOT NULL,
-      last_heartbeat_at TEXT,
-      last_event_at TEXT,
-      current_run_id TEXT,
-      session_metadata_json TEXT
-    );
+export const triggerTypeEnum = pgEnum("trigger_type", [
+  "cron", "manual", "api", "agent", "retry",
+]);
 
-    CREATE TABLE IF NOT EXISTS runs (
-      id TEXT PRIMARY KEY,
-      agent_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      state TEXT NOT NULL,
-      health TEXT NOT NULL,
-      attention TEXT NOT NULL,
-      waiting_reason TEXT,
-      progress_phase TEXT,
-      progress_percent REAL,
-      progress_message TEXT,
-      last_event_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
-    );
+export const executionStatusEnum = pgEnum("execution_status", [
+  "queued", "running", "success", "failed", "timeout", "cancelled",
+]);
 
-    CREATE TABLE IF NOT EXISTS inbox_entries (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL UNIQUE,
-      agent_id TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
-      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
-    );
+export const traceRoleEnum = pgEnum("trace_role", [
+  "system", "user", "assistant", "tool",
+]);
 
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      run_id TEXT,
-      agent_id TEXT NOT NULL,
-      session_key TEXT,
-      project_id TEXT,
-      source_event_id TEXT,
-      correlation_id TEXT,
-      type TEXT NOT NULL,
-      state TEXT,
-      attention TEXT NOT NULL,
-      message TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL,
-      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
-    );
+// --- projects ---
+export const projects = pgTable("projects", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  workspacePath: text("workspace_path"),
+  status: text("status").notNull().default("active"),
+  apiKeyHash: text("api_key_hash"),
+  dashboardPasswordHash: text("dashboard_password_hash"),
+  allowTriggerFrom: text("allow_trigger_from").array().default([]),
+  triggerRateLimitPerSec: integer("trigger_rate_limit_per_sec").default(50),
+  costConfig: jsonb("cost_config").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-    CREATE TABLE IF NOT EXISTS approvals (
-      id TEXT PRIMARY KEY,
-      platform TEXT NOT NULL,
-      state TEXT NOT NULL,
-      attention TEXT NOT NULL,
-      agent_id TEXT,
-      run_id TEXT,
-      upstream_agent_id TEXT,
-      session_key TEXT,
-      host TEXT,
-      node_id TEXT,
-      command TEXT NOT NULL,
-      command_argv_json TEXT,
-      cwd TEXT,
-      security TEXT,
-      ask TEXT,
-      resolved_path TEXT,
-      env_keys_json TEXT,
-      system_run_plan_json TEXT,
-      system_run_binding_json TEXT,
-      created_at TEXT NOT NULL,
-      expires_at TEXT,
-      observed_at TEXT NOT NULL,
-      resolved_at TEXT,
-      resolved_by TEXT,
-      decision TEXT,
-      bridge_session_id TEXT,
-      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
-    );
+// --- agents ---
+export const agents = pgTable("agents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  agentType: text("agent_type").notNull(),
+  cronExpression: text("cron_expression"),
+  enabled: boolean("enabled").notNull().default(true),
+  misfirePolicy: text("misfire_policy").notNull().default("fire_once"),
+  concurrency: integer("concurrency").notNull().default(1),
+  maxPendingQueue: integer("max_pending_queue").notNull().default(100),
+  timeoutSeconds: integer("timeout_seconds").notNull().default(600),
+  retryMax: integer("retry_max").notNull().default(3),
+  retryBackoffBaseMs: integer("retry_backoff_base_ms").notNull().default(30000),
+  maxTurns: integer("max_turns"),
+  maxCostUsd: numeric("max_cost_usd", { precision: 10, scale: 6 }),
+  handlerName: text("handler_name"),
+  executorHost: text("executor_host"),
+  executorStatus: text("executor_status").notNull().default("offline"),
+  inputSchema: jsonb("input_schema"),
+  allowTriggerBy: jsonb("allow_trigger_by"),
+  idempotencyWindowSeconds: integer("idempotency_window_seconds").notNull().default(3600),
+  labels: jsonb("labels").default({}),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  lastExecutionAt: timestamp("last_execution_at", { withTimezone: true }),
+  activeExecutionCount: integer("active_execution_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  projectNameIdx: uniqueIndex("idx_agents_project_name").on(table.projectId, table.name),
+}));
 
-    CREATE TABLE IF NOT EXISTS task_assignments (
-      run_id TEXT PRIMARY KEY,
-      owner TEXT NOT NULL,
-      assigned_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-    );
+// --- executions ---
+export const executions = pgTable("executions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  triggerType: triggerTypeEnum("trigger_type").notNull(),
+  triggeredBy: text("triggered_by"),
+  parentExecutionId: uuid("parent_execution_id"),
+  rootExecutionId: uuid("root_execution_id"),
+  triggerDepth: integer("trigger_depth").notNull().default(0),
+  idempotencyKey: text("idempotency_key"),
+  status: executionStatusEnum("status").notNull().default("queued"),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  durationMs: integer("duration_ms"),
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  inputPayload: jsonb("input_payload"),
+  resultSummary: text("result_summary"),
+  resultData: jsonb("result_data"),
+  errorMessage: text("error_message"),
+  errorStack: text("error_stack"),
+  traceCountExpected: integer("trace_count_expected"),
+  traceCountActual: integer("trace_count_actual").default(0),
+  traceIncomplete: boolean("trace_incomplete").default(false),
+  retryCount: integer("retry_count").notNull().default(0),
+  retryOf: uuid("retry_of"),
+  executorHost: text("executor_host"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-    CREATE TABLE IF NOT EXISTS task_priorities (
-      run_id TEXT PRIMARY KEY,
-      priority TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-    );
+// --- traces ---
+export const traces = pgTable("traces", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  executionId: uuid("execution_id").notNull().references(() => executions.id, { onDelete: "cascade" }),
+  turnIndex: integer("turn_index").notNull(),
+  spanIndex: integer("span_index").notNull().default(0),
+  parentSpanId: uuid("parent_span_id"),
+  role: traceRoleEnum("role").notNull(),
+  spanType: text("span_type").notNull().default("llm"),
+  model: text("model"),
+  provider: text("provider"),
+  inputContent: text("input_content"),
+  outputContent: text("output_content"),
+  toolCalls: jsonb("tool_calls"),
+  toolResults: jsonb("tool_results"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  costEstimate: numeric("cost_estimate", { precision: 10, scale: 6 }),
+  latencyMs: integer("latency_ms"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-    CREATE TABLE IF NOT EXISTS task_handoffs (
-      run_id TEXT PRIMARY KEY,
-      target_owner TEXT NOT NULL,
-      note TEXT,
-      requested_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-    );
+// --- agent_cooldowns ---
+export const agentCooldowns = pgTable("agent_cooldowns", {
+  agentName: text("agent_name").notNull(),
+  cooldownKey: text("cooldown_key").notNull(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull(),
+  runCount: integer("run_count").default(0),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.agentName, table.cooldownKey] }),
+}));
 
-    CREATE TABLE IF NOT EXISTS resource_policies (
-      platform TEXT PRIMARY KEY,
-      slot_limit INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+// --- alert_log ---
+export const alertLog = pgTable("alert_log", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  ruleName: text("rule_name").notNull(),
+  severity: text("severity").notNull(),
+  agentId: uuid("agent_id").references(() => agents.id),
+  message: text("message").notNull(),
+  context: jsonb("context"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-  `);
-
-  ensureColumn(db, "agents", "session_metadata_json", "TEXT");
-  ensureColumn(db, "events", "session_key", "TEXT");
-  ensureColumn(db, "events", "project_id", "TEXT");
-  ensureColumn(db, "events", "source_event_id", "TEXT");
-  ensureColumn(db, "events", "correlation_id", "TEXT");
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_runs_agent_id ON runs(agent_id);
-    CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
-    CREATE INDEX IF NOT EXISTS idx_inbox_updated_at ON inbox_entries(updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_events_agent_id ON events(agent_id);
-    CREATE INDEX IF NOT EXISTS idx_events_session_key ON events(session_key);
-    CREATE INDEX IF NOT EXISTS idx_events_correlation_id ON events(correlation_id);
-    CREATE INDEX IF NOT EXISTS idx_approvals_state ON approvals(state);
-    CREATE INDEX IF NOT EXISTS idx_approvals_observed_at ON approvals(observed_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_task_assignments_updated_at ON task_assignments(updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_task_priorities_updated_at ON task_priorities(updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_task_handoffs_updated_at ON task_handoffs(updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_resource_policies_updated_at ON resource_policies(updated_at DESC);
-  `);
-}
-
-interface TableInfoRow {
-  name: string;
-}
-
-function ensureColumn(
-  db: SqliteDatabase,
-  tableName: "agents" | "runs" | "inbox_entries" | "events",
-  columnName: string,
-  columnDefinition: string,
-): void {
-  const existingColumns = db
-    .prepare<unknown[], TableInfoRow>(`PRAGMA table_info(${tableName})`)
-    .all()
-    .map((row) => row.name);
-
-  if (existingColumns.includes(columnName)) {
-    return;
-  }
-
-  db.exec(
-    `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`,
-  );
-}
+// --- provider_pricing ---
+export const providerPricing = pgTable("provider_pricing", {
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  inputCostPer1k: numeric("input_cost_per_1k", { precision: 10, scale: 6 }).notNull(),
+  outputCostPer1k: numeric("output_cost_per_1k", { precision: 10, scale: 6 }).notNull(),
+  effectiveFrom: date("effective_from").notNull(),
+});

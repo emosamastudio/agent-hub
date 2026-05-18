@@ -9,7 +9,9 @@
     "regression:gemini": "tsx src/scripts/gemini-runtime-regression.ts",
     "regression:openclaw": "tsx src/scripts/openclaw-runtime-regression.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@agent-hub/shared": "0.1.0",
