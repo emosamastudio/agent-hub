@@ -1049,9 +1049,10 @@ Authorization is checked in order. A trigger is rejected at the first failing ch
       - allow_trigger_by restricts    → check agent/project whitelist
    b. If target_agent.project_id != caller.project_id (cross-project):
       - target_project.allow_trigger_from must include caller.project_id
-      - target_agent.allow_trigger_by must be NULL OR explicitly list caller
-        (NULL means "same project only" — cross-project always requires
-         explicit agent-level whitelist)
+      - target_agent.allow_trigger_by must explicitly list caller
+        (NULL is NOT sufficient for cross-project — it only grants
+         same-project access. Cross-project always requires an explicit
+         agent-level whitelist entry.)
 4. System agents (name prefixed '_hub_') → always rejected (409)
 ```
 
