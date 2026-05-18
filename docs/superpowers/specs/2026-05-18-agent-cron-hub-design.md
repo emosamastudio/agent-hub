@@ -184,9 +184,9 @@ CREATE TABLE agents (
   input_schema    JSONB,
 
   -- Trigger authorization
-  allow_trigger_by JSONB DEFAULT '{}',
-                    -- {"projects": ["oph"], "agents": ["steward_backlog"]}
-                    -- {} = any agent in same project can trigger (default)
+  allow_trigger_by JSONB,   -- NULL = any agent in same project can trigger (default)
+                             -- NOT NULL = whitelist: {"projects": ["oph"], "agents": ["steward_backlog"]}
+                             -- {"projects": [], "agents": []} = no agent can trigger (manual/API only)
 
   -- Idempotency
   idempotency_window_seconds INTEGER NOT NULL DEFAULT 3600,  -- 1 hour
@@ -263,9 +263,9 @@ CREATE TABLE executions (
   error_stack     TEXT,
 
   -- Trace completeness
-  trace_count_expected INTEGER,                 -- declared by SDK on report
-  trace_count_actual   INTEGER DEFAULT 0,       -- actual trace rows for this execution
-  trace_incomplete     BOOLEAN DEFAULT false,   -- true if actual < expected
+  trace_count_expected INTEGER,    -- set by SDK on report (final count); NULL during execution
+  trace_count_actual   INTEGER DEFAULT 0,  -- incremented with each trace batch; live during execution
+  trace_incomplete     BOOLEAN DEFAULT false,  -- set by hub on report if actual < expected
 
   -- Retry
   retry_count     INTEGER NOT NULL DEFAULT 0,
@@ -346,7 +346,9 @@ CREATE TABLE agent_cooldowns (
 );
 ```
 
-Used by evaluator agents (steward checks) to persist cooldown state across restarts. Replaces volatile in-memory `time.Time` fields. Each evaluator checks `WHERE last_run_at < now() - cooldown_duration` before running and upserts after completing.
+Used by evaluator agents (steward checks) to persist cooldown state across restarts. Replaces volatile in-memory `time.Time` fields. Each evaluator checks cooldown state before running and upserts after completing.
+
+**Access pattern:** Cooldowns are read and written by agent handler code (running in the executor/SDK process), not by the hub. The SDK exposes this via `ctx.cooldowns.get(key)` and `ctx.cooldowns.set(key)`. Under the hood, these call `GET /api/cooldowns/:agent_name/:key` and `PUT /api/cooldowns/:agent_name/:key`. The hub validates that the authenticated project matches the agent name prefix.
 
 #### `alert_log`
 
@@ -370,6 +372,8 @@ Following the LangFuse pattern: traces are written **during execution**, not in 
 - Traces are visible in the dashboard in real-time (before execution completes)
 - If the execution crashes mid-way, partial traces are preserved
 - The SDK batches trace inserts (configurable batch size, default 10, flush interval 2s) to reduce HTTP overhead
+
+**Trace count semantics:** `trace_count_actual` is incremented with each trace batch, serving as a live counter during execution — the dashboard shows "12 traces recorded so far." `trace_count_expected` is NULL during execution and set by the SDK only at report time, when the handler knows the final count. For dynamic agents (ReAct loops with variable turns), the expected count is inherently unknown until completion — this is normal, not an error. After report, the hub computes `trace_incomplete = (expected != actual)`. If the SDK crashes before reporting, `trace_count_expected` stays NULL and `trace_incomplete` stays false — the dashboard shows the actual count without declaring completeness.
 
 ### 3.4 Cleanup / Retention
 
@@ -408,7 +412,22 @@ The hub computes `cost_estimate` on trace insert as: `(input_tokens * input_cost
 
 ### 4.1 Internal Architecture
 
-The scheduler runs inside the Fastify server process. It uses a cron-evaluation loop + PostgreSQL-based dispatch with `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency-safe claim semantics.
+The scheduler runs inside the Fastify server process. It uses a cron-evaluation loop + PostgreSQL-based dispatch with `SELECT ... FOR UPDATE SKIP LOCKED` for concurrency-safe claim semantics. The tick interval is 1 second (configurable via `AGENT_HUB_SCHEDULER_TICK_MS`).
+
+**Tick error isolation:** Every step in the scheduler tick is independently wrapped in try/catch. A failure in one step (e.g., CronEvaluator hits a PG timeout) does not prevent other steps from running. Matcher dispatch and HeartbeatMonitor must always execute, regardless of upstream failures.
+
+```
+for each tick:
+  try { CronEvaluator.run() }    catch → log error, continue
+  try { HeartbeatMonitor.run() } catch → log error, continue
+  try { TimeoutChecker.run() }   catch → log error, continue
+  try { RetryManager.run() }     catch → log error, continue
+  try { RetentionCleanup.run() } catch → log error, continue
+  try { AlertEvaluator.run() }   catch → log error, continue
+  Matcher.run()  // all instances, no lock; always runs
+```
+
+Each step logs failures at `ERROR` level with full stack trace. The tick loop itself never crashes.
 
 **The scheduler is split into two tiers:**
 
@@ -422,10 +441,20 @@ Leader-only (one instance holds pg_try_advisory_lock):
 │     SELECT * FROM agents WHERE enabled=true AND cron_expression IS NOT NULL
 │     For each agent:
 │       croner.nextRun(cron_expression, last_execution_at) <= now()
-│       → Apply misfire_policy
+│       → Compute pending: COUNT(*) FROM executions WHERE agent_id=$id
+│         AND status IN ('queued','running')
+│       → If pending >= max_pending_queue: log warning, skip this cycle
+│         (queue is full; executions will catch up naturally or timeout)
+│       → Apply misfire_policy, capped by (max_pending_queue - pending):
+│         'fire_once': create 1 execution (respecting cap)
+│         'fire_all':  create up to (max_pending_queue - pending) executions
+│                      for missed windows; drop excess windows
+│         'drop':      skip all; wait for next natural trigger time
 │       → INSERT INTO executions (agent_id, trigger_type='cron', status='queued')
 │       → UPDATE agents SET last_execution_at = now()
 │
+│     max_pending_queue ensures a 12-hour downtime of a * * * * * agent
+│     produces at most 100 queued executions, not 720.
 ├── 2. HeartbeatMonitor
 │     SELECT * FROM agents WHERE executor_status='online'
 │       AND last_heartbeat_at < now() - INTERVAL '30 seconds'
@@ -785,6 +814,8 @@ All SDKs communicate with the hub over HTTP. All requests include `Agent-Hub-Ver
 | `/api/executors/poll` | GET | Long-poll for pending executions (30s timeout) | SDK in pull loop |
 | `/api/executions/:id/report` | POST | Report execution result + trace_count_expected | SDK on completion |
 | `/api/executions/:id/traces` | POST | Append trace records (batch, max 100 per request) | SDK during execution |
+| `/api/cooldowns/:agent_name/:key` | GET | Read cooldown state for a key | SDK / agent handler |
+| `/api/cooldowns/:agent_name/:key` | PUT | Upsert cooldown state (last_run_at, run_count) | SDK / agent handler |
 
 **Authentication:** `Authorization: Bearer <api_key>` header on all requests. API key is SHA-256 hashed and stored in `projects.api_key_hash`.
 
