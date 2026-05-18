@@ -348,6 +348,8 @@ CREATE TABLE agent_cooldowns (
 
 Used by evaluator agents (steward checks) to persist cooldown state across restarts. Replaces volatile in-memory `time.Time` fields. Each evaluator checks cooldown state before running and upserts after completing.
 
+**Orphan handling:** `agent_name` is a TEXT reference, not a UUID FK, because agents are identified by `(project_id, name)` — a composite FK is disproportionate for a helper table. If an agent is renamed or deleted, orphan cooldown rows are harmless dead state. `RetentionCleanup` purges cooldown rows with `last_run_at < now() - INTERVAL '90 days'` on its daily run.
+
 **Access pattern:** Cooldowns are read and written by agent handler code (running in the executor/SDK process), not by the hub. The SDK exposes this via `ctx.cooldowns.get(key)` and `ctx.cooldowns.set(key)`. Under the hood, these call `GET /api/cooldowns/:agent_name/:key` and `PUT /api/cooldowns/:agent_name/:key`. The hub validates that the authenticated project matches the agent name prefix.
 
 #### `alert_log`
@@ -485,25 +487,34 @@ Leader-only (one instance holds pg_try_advisory_lock):
 All-instances (every instance, independently):
 │
 └── 7. Matcher (dispatch queued → running when executor is available)
+      -- Only claim executions for agents that have a local long-poll waiter
+      -- OR have executor_host set (push mode). This prevents orphan executions
+      -- where Instance A claims work that only Instance B has a waiter for.
       SELECT e.* FROM executions e
       JOIN agents a ON e.agent_id = a.id
       WHERE e.status = 'queued'
         AND a.executor_status = 'online'
         AND a.active_execution_count < a.concurrency
+        AND (
+          e.agent_id IN (<local_waiter_agent_ids>)
+          OR a.executor_host IS NOT NULL
+        )
       ORDER BY e.scheduled_at ASC
       LIMIT 10
       FOR UPDATE SKIP LOCKED
       
       For each matched execution:
         → UPDATE agents SET active_execution_count = active_execution_count + 1
-        → Respond to pending long-poll request, OR
-        → POST to executor_host (HMAC-signed, Section 4.4)
+        → If local waiter exists: resolve the Deferred (sends execution to SDK)
+        → Else if executor_host is set: POST (HMAC-signed, Section 4.4)
         → UPDATE execution SET status='running', started_at=now()
 ```
 
 **Why Matcher doesn't need the leader lock:** `SELECT ... FOR UPDATE SKIP LOCKED` already provides concurrency safety — two instances competing for the same rows will never claim the same execution. The `active_execution_count` increment is a simple atomic `UPDATE ... SET count = count + 1`. No leader coordination is needed for dispatch.
 
-**Benefit:** SDKs can connect to *any* instance and receive work. An SDK connected to a non-Leader instance still gets dispatched normally. Leader crash doesn't break dispatch — only scheduling decisions pause briefly until another instance acquires the lock.
+**Multi-instance dispatch semantics:** An execution is only claimed by an instance that either (a) has a local long-poll waiter for that agent, or (b) can push to the agent's `executor_host`. Without the local-waiter check, Instance A could claim a `queued` execution for agent X while only Instance B has an SDK connected for X — producing an orphan execution stuck in `running` until timeout. The `local_waiter_agent_ids` filter prevents this.
+
+**v1 note:** Phase 1-4 runs single-instance, where every waiter is local and this condition is always true. The local-waiter check becomes critical only in Phase 5 multi-instance deployment.
 
 ### 4.2 Startup Recovery
 
@@ -1027,11 +1038,26 @@ All triggers are **fire-and-forget** — the hub creates the execution and retur
 
 ### 8.3 Trigger Authorization
 
-Triggers are scoped to same-project by default. Cross-project triggers require:
-1. Target project's `allow_trigger_from` includes the caller's project ID
-2. Target agent's `allow_trigger_by` doesn't restrict this caller
+Authorization is checked in order. A trigger is rejected at the first failing check.
 
-System agents (names prefixed `_hub_`) cannot be triggered via the external API.
+```
+1. API key → resolve caller project_id
+2. Resolve target agent by name
+3. Same-project check:
+   a. If target_agent.project_id == caller.project_id:
+      - allow_trigger_by is NULL      → allowed (default: any agent in same project)
+      - allow_trigger_by restricts    → check agent/project whitelist
+   b. If target_agent.project_id != caller.project_id (cross-project):
+      - target_project.allow_trigger_from must include caller.project_id
+      - target_agent.allow_trigger_by must be NULL OR explicitly list caller
+        (NULL means "same project only" — cross-project always requires
+         explicit agent-level whitelist)
+4. System agents (name prefixed '_hub_') → always rejected (409)
+```
+
+**Key semantic:** `allow_trigger_by = NULL` means "any agent in my project." It does NOT grant cross-project access. If project `oph` wants agent `llm_extract` to be triggerable by project `external`, both conditions must be met: `llm-wiki.allow_trigger_from` includes `'oph'`, AND `llm_extract.allow_trigger_by` explicitly lists `'oph/steward_backlog'` (or `'oph'` as project-level wildcard). This prevents the case where adding a project to `allow_trigger_from` unexpectedly opens access to all its agents.
+
+System agents (names prefixed `_hub_`) cannot be triggered via the external API at all.
 
 ### 8.4 Trigger Depth Limit
 
@@ -1085,7 +1111,31 @@ The hub sets the following fields on the new execution:
 | `idempotency_key` | From trigger request body |
 | `input_payload` | From trigger request `payload` field |
 
-**`X-Execution-ID` header protocol:** The SDK's `ctx.trigger()` method automatically includes `X-Execution-ID: {current_execution_id}` on the HTTP request. This serves dual purpose: (1) identifies the trigger as agent-to-agent, (2) establishes the chain linkage. The caller's API key provides project-level auth; the header provides chain-level identity. The hub validates that the execution referenced by `X-Execution-ID` belongs to a project authorized to trigger the target agent (Section 8.3).
+**`X-Execution-ID` header validation chain:** The hub validates the header before establishing chain linkage. All checks must pass; the first failure returns an error response.
+
+```
+1. Execution exists:
+   SELECT id, agent_id, project_id, status FROM executions WHERE id = $header_value
+   → 404 if not found
+
+2. Execution is in 'running' state:
+   Only a running handler can trigger downstream agents.
+   → 409 "trigger_from_terminal_execution" if status is 'success','failed','cancelled','timeout'
+
+3. Execution belongs to the authenticated project:
+   The API key's project_id must match the execution's project_id.
+   → 403 "execution_not_owned" if mismatch
+   (Prevents project P using project Q's execution_id to forge a trigger chain)
+
+4. Target agent authorization (Section 8.3):
+   Standard cross-project and allow_trigger_by checks apply.
+   If the parent execution's agent has been granted access,
+   the trigger proceeds.
+```
+
+**Why check #2 matters:** A handler reports `success` at the end of its execution. If the SDK sends a stray `ctx.trigger()` call after reporting, the execution is already terminal — the trigger is rejected. This prevents post-mortem chain extensions. The 409 response tells the SDK its trigger was dropped, which is logged as a warning.
+
+**Why check #3 matters:** Without it, an attacker with a valid API key for project `malicious` could POST to `/api/agents/deep_research/trigger` with `X-Execution-ID: <some_oph_execution_id>` and make it appear as if OPH's steward triggered the deep_research. The project match check ensures the header's execution belongs to the same project as the API key.
 
 The chain is traversable via `GET /api/executions/:id/trigger-chain?direction=up|down|both`, implemented as a recursive CTE on `parent_execution_id`.
 
@@ -1217,7 +1267,7 @@ This section documents the specific patterns needed to safely decompose OPH's 60
 
 4. **Cross-agent discovery dedup**: Before enqueuing `StageDiscovery`, check if any active discovery run already covers the same policy/trigger ref.
 
-5. **Shared event log**: All steward agents write significant events to a `steward_events` table (or use execution-level `result_data`). The operator console queries across all steward agents to reconstruct "what did the system do recently."
+5. **Shared event log via `result_data`**: All steward agents write significant events to their execution's `result_data` JSONB field. For example, `{"actions": [{"type": "enqueued_deep_analysis", "repo": "owner/repo", "reason": "cadence_reentry"}]}`. The operator console queries execution history across all steward agents (`WHERE agent_id IN (SELECT id FROM agents WHERE name LIKE 'steward_%')`). No separate table needed — execution records ARE the event log.
 
 ### 11.2 Known Risks & Mitigations
 
