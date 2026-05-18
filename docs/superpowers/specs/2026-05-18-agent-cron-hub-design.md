@@ -222,7 +222,7 @@ Note: `agent_loop` was considered but removed. Long-running loops (like OPH stew
 #### `executions`
 
 ```sql
-CREATE TYPE trigger_type AS ENUM ('cron', 'manual', 'api', 'retry');
+CREATE TYPE trigger_type AS ENUM ('cron', 'manual', 'api', 'agent', 'retry');
 CREATE TYPE execution_status AS ENUM (
   'queued', 'running', 'success', 'failed', 'timeout', 'cancelled'
 );
@@ -233,7 +233,7 @@ CREATE TABLE executions (
 
   -- Trigger info
   trigger_type    trigger_type NOT NULL,
-  triggered_by    TEXT,                         -- 'cron', 'user:emo', 'api:oph-steward'
+  triggered_by    TEXT,            -- 'cron', 'user:emo', 'api:oph-steward', 'agent:steward_backlog'
 
   -- Agent-to-agent trigger chain (Temporal child workflow pattern)
   parent_execution_id UUID REFERENCES executions(id),  -- who triggered me
@@ -1028,12 +1028,24 @@ await ctx.triggerBatch(
 
 ### 8.7 Trigger Chain Data
 
-When a trigger creates an execution, the hub sets:
-- `parent_execution_id` = triggering execution's ID
-- `root_execution_id` = triggering execution's `root_execution_id` ?? triggering execution's ID
-- `trigger_depth` = triggering execution's `trigger_depth + 1`
-- `idempotency_key` = from the trigger request
-- `input_payload` = from `payload` field
+When a trigger creates an execution, the hub distinguishes the source:
+
+- **External API call** (no `X-Execution-ID` header): `trigger_type = 'api'`, no chain linkage
+- **Agent-to-agent** (`X-Execution-ID` header present): `trigger_type = 'agent'`, chain linkage established
+
+The hub sets the following fields on the new execution:
+
+| Field | Source |
+|-------|--------|
+| `trigger_type` | `'agent'` if `X-Execution-ID` header present; `'api'` otherwise |
+| `parent_execution_id` | Value of `X-Execution-ID` header (NULL for API triggers) |
+| `root_execution_id` | Parent's `root_execution_id` ?? parent's `id` (NULL for API triggers) |
+| `trigger_depth` | Parent's `trigger_depth + 1` (0 for API triggers) |
+| `triggered_by` | `'agent:{parent_agent_name}'` or `'api:{project_name}'` |
+| `idempotency_key` | From trigger request body |
+| `input_payload` | From trigger request `payload` field |
+
+**`X-Execution-ID` header protocol:** The SDK's `ctx.trigger()` method automatically includes `X-Execution-ID: {current_execution_id}` on the HTTP request. This serves dual purpose: (1) identifies the trigger as agent-to-agent, (2) establishes the chain linkage. The caller's API key provides project-level auth; the header provides chain-level identity. The hub validates that the execution referenced by `X-Execution-ID` belongs to a project authorized to trigger the target agent (Section 8.3).
 
 The chain is traversable via `GET /api/executions/:id/trigger-chain?direction=up|down|both`, implemented as a recursive CTE on `parent_execution_id`.
 
