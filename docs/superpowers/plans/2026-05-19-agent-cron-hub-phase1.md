@@ -951,7 +951,7 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
 
 ```typescript
 // apps/server/src/app.ts
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { createPool, createDb, getPool, closePool } from "./db/connection.js";
@@ -1028,7 +1028,6 @@ async function main() {
   console.log(`Agent Cron Hub listening on http://${serverConfig.host}:${serverConfig.port}`);
 
   // Start scheduler — reuses the same repos created by createApp
-  const { startScheduler } = await import("./services/scheduler.js");
   startScheduler({
     agentRepo: appCtx.agentRepo,
     executionRepo: appCtx.executionRepo,
@@ -1078,10 +1077,6 @@ import type { AgentRepository } from "../repositories/agent-repository.js";
 import type { ExecutionRepository } from "../repositories/execution-repository.js";
 import type { TraceRepository } from "../repositories/trace-repository.js";
 import { serverConfig } from "../config.js";
-import { agents } from "../db/schema.js";
-
-type CronerInstance = ReturnType<typeof croner>;
-
 export interface SchedulerContext {
   agentRepo: AgentRepository;
   executionRepo: ExecutionRepository;
@@ -1770,9 +1765,9 @@ Add these routes inside `registerRoutes()` after the SDK-facing endpoints:
   });
 ```
 
-- [ ] **Step 1: Add dashboard routes to routes.ts**
+- [ ] **Step 1: Add dashboard routes and import to routes.ts**
 
-Insert the above code block in `registerRoutes()` right before the `/ws` WebSocket handler.
+First, in routes.ts top-level imports, add `import { Cron } from "croner";` (required by the schedule-preview endpoint). Then insert the dashboard routes code block in `registerRoutes()` right before the `/ws` WebSocket handler.
 
 - [ ] **Step 2: Commit**
 
