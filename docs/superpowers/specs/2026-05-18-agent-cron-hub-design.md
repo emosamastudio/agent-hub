@@ -468,7 +468,7 @@ All-instances (every instance, independently):
       For each matched execution:
         → UPDATE agents SET active_execution_count = active_execution_count + 1
         → Respond to pending long-poll request, OR
-        → POST to executor_host (HMAC-signed, Section 4.3)
+        → POST to executor_host (HMAC-signed, Section 4.4)
         → UPDATE execution SET status='running', started_at=now()
 ```
 
@@ -476,7 +476,28 @@ All-instances (every instance, independently):
 
 **Benefit:** SDKs can connect to *any* instance and receive work. An SDK connected to a non-Leader instance still gets dispatched normally. Leader crash doesn't break dispatch — only scheduling decisions pause briefly until another instance acquires the lock.
 
-### 4.2 Long-Poll Dispatch (Pull Mode)
+### 4.2 Startup Recovery
+
+On hub startup (before the scheduler tick loop begins), the hub runs a compensation query to align `active_execution_count` with reality:
+
+```sql
+-- Compensate for any counter drift from unclean shutdown
+UPDATE agents SET active_execution_count = (
+  SELECT COUNT(*) FROM executions
+  WHERE executions.agent_id = agents.id
+    AND executions.status = 'running'
+);
+```
+
+This handles the crash-recovery scenario: if the hub crashed with `active_execution_count = 3` but one executor subsequently completed and another crashed, the compensation query resets the count to the actual number of `running` rows in the database.
+
+**Executions that were `running` at crash time are NOT immediately failed.** They remain `running` and enter a recovery window:
+- If the executor is still alive, its next heartbeat (within 10s) keeps `executor_status = 'online'`, and its next report call completes the execution normally
+- If the executor died, `HeartbeatMonitor` detects the missed heartbeat after 30s, marks the executor offline, cancels the executions, and zeros the counter
+
+**Max recovery window: 30 seconds** from hub startup. During this window, `active_execution_count` may be non-zero for agents whose executors are dead, causing the Matcher to skip them. This is acceptable: execution SLAs are minutes to hours, and running the compensation query at startup bounds the window to a single HeartbeatMonitor cycle. No permanent scheduling blockage.
+
+### 4.3 Long-Poll Dispatch (Pull Mode)
 
 The primary dispatch mechanism. Executors call `GET /api/executors/poll` with their agent names. The server holds the connection open (up to 30s). When a matching execution is queued, it returns immediately. If no execution is available within the timeout, it returns `204 No Content` and the executor re-polls.
 
@@ -484,11 +505,11 @@ The primary dispatch mechanism. Executors call `GET /api/executors/poll` with th
 
 **Library reference:** This is the same pattern used by Temporal's `PollWorkflowTaskQueue` and Prefect's worker polling. Implementation uses a `Map<agentId, Deferred[]>` in the server — when the Matcher finds a queued execution, it resolves the oldest pending long-poll request for that agent.
 
-### 4.3 Push Dispatch (Callback)
+### 4.4 Push Dispatch (Callback)
 
 Secondary mechanism. If an agent's `executor_host` is set and reachable, the hub POSTs to `http://{executor_host}/agent-hub/execute` with the execution payload. **Push requests are HMAC-signed** using a shared secret derived from the project API key (`HMAC-SHA256(api_key, execution_id + timestamp)`). The SDK verifies this signature before executing to prevent injection of fake executions.
 
-### 4.4 Leader Election (for HA)
+### 4.5 Leader Election (for HA)
 
 When running multiple hub instances, the Leader lock protects only **scheduling decisions** (CronEvaluator, HeartbeatMonitor, TimeoutChecker, RetryManager, RetentionCleanup, AlertEvaluator). Dispatch (Matcher) runs on all instances without the lock.
 
@@ -515,7 +536,7 @@ The instance that holds the lock runs the Leader-only components. If the instanc
 
 **Instance symmetry:** All hub instances are identical. They all run the same code, expose the same API, and participate in dispatch. The only difference is which one holds the advisory lock at any moment. This is the same model as River's leader election.
 
-### 4.5 Scale Boundaries & Target
+### 4.6 Scale Boundaries & Target
 
 This design is validated for:
 - **Up to 100 agents** across ~5 projects
