@@ -12,6 +12,7 @@ import { basicAuth } from "./middleware/auth.js";
 import { serverConfig } from "./config.js";
 
 export interface AppContext {
+  db: ReturnType<typeof createDb>;
   projectRepo: ProjectRepository;
   agentRepo: AgentRepository;
   executionRepo: ExecutionRepository;
@@ -36,7 +37,7 @@ export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppConte
   const executionRepo = new ExecutionRepository(db);
   const traceRepo = new TraceRepository(db);
 
-  const ctx: AppContext = { projectRepo, agentRepo, executionRepo, traceRepo };
+  const ctx: AppContext = { db, projectRepo, agentRepo, executionRepo, traceRepo };
 
   // Dashboard Basic Auth
   app.addHook("onRequest", basicAuth);
