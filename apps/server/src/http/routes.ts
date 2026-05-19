@@ -260,6 +260,127 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     return { ok: true };
   });
 
+  // ── Projects (Dashboard API) ──
+  app.get("/api/projects", async () => {
+    return ctx.projectRepo.findAll();
+  });
+
+  // ── Agents (Dashboard API) ──
+  app.get("/api/agents", async (request) => {
+    const { project, type, status } = request.query as Record<string, string>;
+    return ctx.agentRepo.findAll({
+      projectId: project,
+      agentType: type,
+      executorStatus: status,
+    });
+  });
+
+  app.get("/api/agents/:id", async (request, reply) => {
+    const agent = await ctx.agentRepo.findById((request.params as any).id);
+    if (!agent) return reply.status(404).send({ error: "not found" });
+    const recentExecs = await ctx.executionRepo.findAll({
+      agentId: agent.id, limit: 10,
+    });
+    return { ...agent, recentExecutions: recentExecs };
+  });
+
+  app.patch("/api/agents/:id", async (request, reply) => {
+    const body = request.body as Record<string, unknown>;
+    const agent = await ctx.agentRepo.update((request.params as any).id, body as any);
+    if (!agent) return reply.status(404).send({ error: "not found" });
+    return agent;
+  });
+
+  app.patch("/api/agents/bulk", async (request) => {
+    const { project, enabled } = request.body as { project: string; enabled: boolean };
+    const projectAgents = await ctx.agentRepo.findAll({ projectId: project });
+    for (const agent of projectAgents) {
+      await ctx.agentRepo.update(agent.id, { enabled } as any);
+    }
+    return { ok: true, count: projectAgents.length };
+  });
+
+  app.get("/api/agents/:id/schedule-preview", async (request) => {
+    const agent = await ctx.agentRepo.findById((request.params as any).id);
+    if (!agent || !agent.cronExpression) return { runs: [] };
+    const cron = new Cron(agent.cronExpression);
+    const now = new Date();
+    const previews = [];
+    let cursor = now;
+    for (let i = 0; i < 10; i++) {
+      const next = cron.nextRun(cursor);
+      if (!next) break;
+      previews.push(next.toISOString());
+      cursor = new Date(next.getTime() + 1);
+    }
+    return { runs: previews };
+  });
+
+  // ── Executions (Dashboard API) ──
+  app.get("/api/executions", async (request) => {
+    const { agent_id, status, trigger_type, since, limit, offset } = request.query as Record<string, string>;
+    return ctx.executionRepo.findAll({
+      agentId: agent_id,
+      status,
+      triggerType: trigger_type,
+      since: since ? new Date(since) : undefined,
+      limit: limit ? parseInt(limit) : 50,
+      offset: offset ? parseInt(offset) : 0,
+    });
+  });
+
+  app.get("/api/executions/:id", async (request, reply) => {
+    const exec = await ctx.executionRepo.findById((request.params as any).id);
+    if (!exec) return reply.status(404).send({ error: "not found" });
+    return exec;
+  });
+
+  app.get("/api/executions/:id/traces", async (request) => {
+    return ctx.traceRepo.findByExecution((request.params as any).id);
+  });
+
+  app.get("/api/executions/:id/trigger-chain", async (request) => {
+    const result = await ctx.executionRepo.findTriggerChain((request.params as any).id, "both");
+    return result?.rows ?? [];
+  });
+
+  app.post("/api/executions/:id/cancel", async (request, reply) => {
+    const exec = await ctx.executionRepo.updateStatus((request.params as any).id, "cancelled");
+    if (!exec) return reply.status(404).send({ error: "not found" });
+    await ctx.agentRepo.decrementExecutionCount(exec.agentId);
+    return { ok: true };
+  });
+
+  // ── Executors (Dashboard API) ──
+  app.get("/api/executors", async (request) => {
+    const { project } = request.query as Record<string, string>;
+    const onlineAgents = await ctx.agentRepo.findAll({
+      projectId: project,
+      executorStatus: "online",
+    });
+    return onlineAgents.map(a => ({
+      agent_name: a.name,
+      executor_host: a.executorHost,
+      executor_status: a.executorStatus,
+      last_heartbeat_at: a.lastHeartbeatAt,
+      active_executions: a.activeExecutionCount,
+    }));
+  });
+
+  // ── Stats ──
+  app.get("/api/stats", async () => {
+    const allAgents = await ctx.agentRepo.findAll({});
+    const recentExecs = await ctx.executionRepo.findAll({ limit: 200 });
+    const succeeded = recentExecs.filter(e => e.status === "success").length;
+    const failed = recentExecs.filter(e => e.status === "failed").length;
+    return {
+      agents_total: allAgents.length,
+      agents_online: allAgents.filter(a => a.executorStatus === "online").length,
+      recent_success_rate: recentExecs.length > 0 ? (succeeded / recentExecs.length * 100).toFixed(1) : "0",
+      recent_failures: failed,
+    };
+  });
+
   // ── WebSocket ──
   app.get("/ws", { websocket: true }, (socket, _req) => {
     socket.on("message", (_msg) => {
