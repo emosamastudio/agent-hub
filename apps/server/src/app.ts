@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { createPool, createDb, closePool } from "./db/connection.js";
+import { seedIfEmpty } from "./db/seed.js";
 import { ProjectRepository } from "./repositories/project-repository.js";
 import { AgentRepository } from "./repositories/agent-repository.js";
 import { ExecutionRepository } from "./repositories/execution-repository.js";
@@ -26,6 +27,9 @@ export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppConte
   const pool = createPool(serverConfig.databaseUrl);
   const db = createDb(pool);
 
+  // Seed default project + demo agent if database is empty
+  await seedIfEmpty(db);
+
   // Repositories
   const projectRepo = new ProjectRepository(db);
   const agentRepo = new AgentRepository(db);
@@ -41,7 +45,7 @@ export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppConte
   registerRoutes(app, ctx);
 
   // Error handler
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error: any, _request, reply) => {
     app.log.error(error);
     reply.status(error.statusCode ?? 500).send({
       error: error.message ?? "Internal Server Error",

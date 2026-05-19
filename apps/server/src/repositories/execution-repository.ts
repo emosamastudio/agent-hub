@@ -80,7 +80,7 @@ export class ExecutionRepository {
   async countByAgentAndStatus(agentId: string, statuses: string[]) {
     const result = await this.db.execute(sql`
       SELECT COUNT(*)::int as cnt FROM executions
-      WHERE agent_id = ${agentId} AND status IN (${sql.join(statuses.map(s => sql`${s}`))})
+      WHERE agent_id = ${agentId} AND status IN (${sql.join(statuses.map(s => sql`${s}`), sql`, `)})
     `);
     return (result.rows[0] as any)?.cnt ?? 0;
   }
