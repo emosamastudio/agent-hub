@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { serverConfig } from "../config.js";
 import { Cron } from "croner";
@@ -138,27 +139,41 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     const projectAgents = await ctx.agentRepo.findAll({ projectId, enabled: true });
     for (const agent of projectAgents) {
       await ctx.agentRepo.updateHeartbeat(agent.id);
+      broadcast({ type: "agent.updated", agent_id: agent.id, executor_status: "online" });
     }
     return { ok: true };
   });
 
-  // ── Executor Poll (dispatch via poll route — Phase 1 single-instance) ──
+  // ── Executor Poll (long-poll with 30s timeout) ──
   app.get("/api/executors/poll", async (request, reply) => {
     const projectId = await getProjectId();
     const projectAgents = await ctx.agentRepo.findAll({ projectId, enabled: true });
     const agentIds = projectAgents.map(a => a.id);
     if (agentIds.length === 0) return reply.status(204).send();
 
-    const queuedExecs = await ctx.executionRepo.findQueued();
-    const match = queuedExecs.find(e => agentIds.includes(e.execution.agentId));
+    // Poll with timeout: check every 1s for up to 30s
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const queuedExecs = await ctx.executionRepo.findQueued();
+      const match = queuedExecs.find(e => agentIds.includes(e.execution.agentId));
 
-    if (!match) return reply.status(204).send();
+      if (match) {
+        const claimed = await ctx.executionRepo.claimForDispatch(match.execution.id);
+        if (!claimed) {
+          // Raced with another poller, try again
+          await new Promise(r => setTimeout(r, 200));
+          continue;
+        }
+        await ctx.agentRepo.incrementExecutionCount(match.execution.agentId);
+        return reply.send(claimed);
+      }
 
-    const claimed = await ctx.executionRepo.claimForDispatch(match.execution.id);
-    if (!claimed) return reply.status(204).send();
+      // No work yet — wait 1s then check again
+      await new Promise(r => setTimeout(r, 1000));
+    }
 
-    await ctx.agentRepo.incrementExecutionCount(match.execution.agentId);
-    return reply.send(claimed);
+    // Timeout: no work available
+    return reply.status(204).send();
   });
 
   // ── Execution Report ──
@@ -184,6 +199,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     });
 
     await ctx.agentRepo.decrementExecutionCount(exec.agentId);
+    broadcast({ type: "execution.updated", execution: await ctx.executionRepo.findById(id) });
     return { ok: true };
   });
 
@@ -205,6 +221,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
     await ctx.traceRepo.insertBatch(rows as any[]);
     await ctx.executionRepo.incrementTraceCount(id, rows.length);
+    broadcast({ type: "trace.appended", execution_id: id, count: rows.length });
     return { ok: true, count: rows.length };
   });
 
@@ -256,15 +273,31 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
       idempotencyKey: body.idempotency_key ?? null,
     } as any);
 
+    broadcast({ type: "execution.created", execution });
     return reply.status(202).send({ execution_id: execution.id, status: "queued", duplicate: false });
   });
 
-  // ── Cooldowns (Phase 1 stub — Phase 2 full implementation) ──
-  app.get("/api/cooldowns/:agentName/:key", async (_request) => {
-    return { agent_name: (_request.params as any).agentName, cooldown_key: (_request.params as any).key, last_run_at: null, run_count: 0 };
+  // ── Cooldowns ──
+  app.get("/api/cooldowns/:agentName/:key", async (request) => {
+    const { agentName, key } = request.params as { agentName: string; key: string };
+    const result = await ctx.db.execute(sql`
+      SELECT * FROM agent_cooldowns WHERE agent_name = ${agentName} AND cooldown_key = ${key}
+    `);
+    const row = result.rows[0];
+    if (!row) return { agent_name: agentName, cooldown_key: key, last_run_at: null, run_count: 0 };
+    return row;
   });
 
-  app.put("/api/cooldowns/:agentName/:key", async (_request) => {
+  app.put("/api/cooldowns/:agentName/:key", async (request) => {
+    const { agentName, key } = request.params as { agentName: string; key: string };
+    const body = (request.body as { last_run_at?: string }) ?? {};
+    const now = body.last_run_at ?? new Date().toISOString();
+    await ctx.db.execute(sql`
+      INSERT INTO agent_cooldowns (agent_name, cooldown_key, last_run_at, run_count)
+      VALUES (${agentName}, ${key}, ${now}, 1)
+      ON CONFLICT (agent_name, cooldown_key)
+      DO UPDATE SET last_run_at = ${now}, run_count = agent_cooldowns.run_count + 1
+    `);
     return { ok: true };
   });
 
@@ -389,10 +422,21 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     };
   });
 
-  // ── WebSocket ──
+  // ── WebSocket with Pub/Sub ──
+  const wsClients = new Set<any>();
+
+  function broadcast(event: Record<string, unknown>) {
+    const msg = JSON.stringify(event);
+    for (const socket of wsClients) {
+      try { socket.send(msg); } catch {}
+    }
+  }
+  (globalThis as any).__hubBroadcast = broadcast;
+
   app.get("/ws", { websocket: true }, (socket, _req) => {
-    socket.on("message", (_msg) => {
-      socket.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
-    });
+    wsClients.add(socket);
+    socket.on("close", () => { wsClients.delete(socket); });
+    socket.on("error", () => { wsClients.delete(socket); });
+    socket.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
   });
 }

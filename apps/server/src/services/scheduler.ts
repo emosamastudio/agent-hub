@@ -4,6 +4,11 @@ import type { ExecutionRepository } from "../repositories/execution-repository.j
 import type { TraceRepository } from "../repositories/trace-repository.js";
 import { serverConfig } from "../config.js";
 
+function broadcast(event: Record<string, unknown>) {
+  const fn = (globalThis as any).__hubBroadcast;
+  if (fn) fn(event);
+}
+
 export interface SchedulerContext {
   agentRepo: AgentRepository;
   executionRepo: ExecutionRepository;
@@ -91,6 +96,7 @@ async function heartbeatMonitor(ctx: SchedulerContext) {
   const stale = await ctx.agentRepo.findWithStaleHeartbeat(30);
   for (const agent of stale) {
     await ctx.agentRepo.markOffline(agent.id);
+    broadcast({ type: "agent.updated", agent_id: agent.id, executor_status: "offline" });
     const running = await ctx.executionRepo.findAll({ agentId: agent.id, status: "running", limit: 100 });
     for (const exec of running) {
       await ctx.executionRepo.updateStatus(exec.id, "cancelled");

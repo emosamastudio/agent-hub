@@ -39,11 +39,24 @@ export default function App() {
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
-    const ws = connectSocket();
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => setWsConnected(false);
-    ws.onmessage = () => loadData();
-    return () => ws.close();
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    function connect() {
+      ws = connectSocket();
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => {
+        setWsConnected(false);
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+      ws.onmessage = () => loadData();
+    }
+
+    connect();
+    return () => {
+      ws.close();
+      clearTimeout(reconnectTimer);
+    };
   }, [loadData]);
 
   useEffect(() => {
