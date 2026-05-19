@@ -70,12 +70,20 @@ const traceBatchSchema = z.object({
   })),
 });
 
-function getProjectId(_request: any): string {
-  return "default";
-}
 
 export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   // ── Health ──
+  // Phase 1: resolve project from seed. In Phase 5, use API key → project lookup.
+  let cachedProjectId: string | null = null;
+
+  async function getProjectId(): Promise<string> {
+    if (cachedProjectId) return cachedProjectId;
+    const project = await ctx.projectRepo.findByName("default");
+    if (!project) throw new Error("Default project not found — run seed first");
+    cachedProjectId = project.id;
+    return cachedProjectId;
+  }
+
   app.get("/api/health", async () => ({
     status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString(),
   }));
@@ -91,7 +99,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
   // ── Agent Registry ──
   app.put("/api/registry/agents", async (request, reply) => {
-    const projectId = getProjectId(request);
+    const projectId = await getProjectId();
     const body = agentSpecSchema.parse(request.body);
     const agent = await ctx.agentRepo.upsert(projectId, body.name, {
       displayName: body.displayName,
@@ -117,7 +125,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   });
 
   app.delete("/api/registry/agents/:name", async (request, reply) => {
-    const projectId = getProjectId(request);
+    const projectId = await getProjectId();
     const { name } = request.params as { name: string };
     await ctx.agentRepo.deregisterByName(projectId, name);
     return reply.status(204).send();
@@ -125,7 +133,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
   // ── Executor Heartbeat ──
   app.post("/api/executors/heartbeat", async (request, reply) => {
-    const projectId = getProjectId(request);
+    const projectId = await getProjectId();
     const body = heartbeatSchema.parse(request.body);
     const projectAgents = await ctx.agentRepo.findAll({ projectId, enabled: true });
     for (const agent of projectAgents) {
@@ -136,7 +144,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
   // ── Executor Poll (dispatch via poll route — Phase 1 single-instance) ──
   app.get("/api/executors/poll", async (request, reply) => {
-    const projectId = getProjectId(request);
+    const projectId = await getProjectId();
     const projectAgents = await ctx.agentRepo.findAll({ projectId, enabled: true });
     const agentIds = projectAgents.map(a => a.id);
     if (agentIds.length === 0) return reply.status(204).send();
@@ -204,7 +212,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   app.post("/api/agents/:name/trigger", async (request, reply) => {
     const { name } = request.params as { name: string };
     const body = triggerSchema.parse(request.body);
-    const projectId = getProjectId(request);
+    const projectId = await getProjectId();
 
     const parentExecId = request.headers["x-execution-id"] as string | undefined;
     const triggerSource = request.headers["x-trigger-source"] as string | undefined;
