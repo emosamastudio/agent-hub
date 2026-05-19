@@ -1,90 +1,59 @@
-import type { AgentEvent, DashboardSnapshot, RunAction } from "@agent-hub/shared";
+const BASE = "";
 
-type DashboardSocketMessage =
-  | { type: "event"; data: AgentEvent }
-  | { type: "snapshot"; data: DashboardSnapshot };
-
-const apiBase = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-
-function withBase(pathname: string) {
-  return `${apiBase}${pathname}`;
+function authHeaders(): Record<string, string> {
+  return { "Authorization": "Basic " + btoa("admin:admin") };
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const fallback = `Request failed with status ${response.status}.`;
-
-    try {
-      const body = (await response.json()) as { message?: string };
-      throw new Error(body.message ?? fallback);
-    } catch (error) {
-      if (error instanceof Error) {
-        throw error;
-      }
-
-      throw new Error(fallback);
-    }
-  }
-
-  return (await response.json()) as T;
+export async function fetchAgents(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  const res = await fetch(`${BASE}/api/agents${qs}`, { headers: authHeaders() });
+  return res.json();
 }
 
-export async function fetchSnapshot() {
-  const response = await fetch(withBase("/api/snapshot"));
-  return readResponse<DashboardSnapshot>(response);
+export async function fetchExecutions(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  const res = await fetch(`${BASE}/api/executions${qs}`, { headers: authHeaders() });
+  return res.json();
 }
 
-export async function postRunAction(runId: string, action: RunAction) {
-  const response = await fetch(withBase(`/api/runs/${runId}/actions`), {
+export async function fetchExecutionDetail(id: string) {
+  const res = await fetch(`${BASE}/api/executions/${id}`, { headers: authHeaders() });
+  return res.json();
+}
+
+export async function fetchTraces(executionId: string) {
+  const res = await fetch(`${BASE}/api/executions/${executionId}/traces`, { headers: authHeaders() });
+  return res.json();
+}
+
+export async function fetchStats() {
+  const res = await fetch(`${BASE}/api/stats`, { headers: authHeaders() });
+  return res.json();
+}
+
+export async function patchAgent(id: string, body: Record<string, unknown>) {
+  const res = await fetch(`${BASE}/api/agents/${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+export async function triggerAgent(name: string, payload: unknown) {
+  const res = await fetch(`${BASE}/api/agents/${name}/trigger`, {
     method: "POST",
     headers: {
-      "content-type": "application/json",
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "X-Trigger-Source": "dashboard",
     },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ payload }),
   });
-
-  return readResponse<{
-    event: AgentEvent;
-    snapshot: DashboardSnapshot;
-  }>(response);
+  return res.json();
 }
 
-export function connectDashboardSocket(handlers: {
-  onClose: () => void;
-  onOpen: () => void;
-  onSnapshot: (snapshot: DashboardSnapshot) => void;
-}) {
-  const socket = new WebSocket(resolveSocketUrl());
-
-  socket.addEventListener("open", handlers.onOpen);
-  socket.addEventListener("close", handlers.onClose);
-  socket.addEventListener("error", handlers.onClose);
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data) as DashboardSocketMessage;
-
-    if (message.type === "snapshot") {
-      handlers.onSnapshot(message.data);
-    }
-  });
-
-  return () => {
-    socket.close();
-  };
-}
-
-function resolveSocketUrl() {
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL;
-  }
-
-  if (apiBase) {
-    const url = new URL(apiBase);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = "/ws";
-    url.search = "";
-    return url.toString();
-  }
-
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/ws`;
+export function connectSocket(): WebSocket {
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  return new WebSocket(`${protocol}://${location.host}/ws`);
 }
