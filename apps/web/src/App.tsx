@@ -4,19 +4,19 @@ import { fetchAgents, fetchExecutions, fetchStats, patchAgent, triggerAgent, con
 type Page = "overview" | "agents" | "executions" | "detail" | "agent-detail";
 
 interface Agent {
-  id: string; name: string; display_name: string; agent_type: string;
-  cron_expression: string | null; enabled: boolean;
-  executor_status: string; active_execution_count: number;
-  last_execution_at: string | null; last_heartbeat_at: string | null;
+  id: string; name: string; displayName: string; agentType: string;
+  cronExpression: string | null; enabled: boolean;
+  executorStatus: string; activeExecutionCount: number;
+  lastExecutionAt: string | null; lastHeartbeatAt: string | null;
   recentExecutions?: Execution[];
 }
 
 interface Execution {
-  id: string; agent_id: string; trigger_type: string; status: string;
-  triggered_by: string | null;
-  started_at: string | null; finished_at: string | null; duration_ms: number | null;
-  result_summary: string | null; error_message: string | null;
-  trace_count_actual: number;
+  id: string; agentId: string; triggerType: string; status: string;
+  triggeredBy: string | null;
+  startedAt: string | null; finishedAt: string | null; durationMs: number | null;
+  resultSummary: string | null; errorMessage: string | null;
+  traceCountActual: number;
 }
 
 export default function App() {
@@ -103,10 +103,10 @@ export default function App() {
       {page === "overview" && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
-            <StatCard label="Agents" value={stats.agents_total ?? agents.length} />
-            <StatCard label="Online" value={stats.agents_online ?? agents.filter(a => a.executor_status === "online").length} />
+            <StatCard label="Agents" value={stats.agentsTotal ?? agents.length} />
+            <StatCard label="Online" value={stats.agentsOnline ?? agents.filter(a => a.executorStatus === "online").length} />
             <StatCard label="Running" value={executions.filter(e => e.status === "running").length} />
-            <StatCard label="Failed (24h)" value={stats.recent_failures ?? 0} />
+            <StatCard label="Failed (24h)" value={stats.recentFailures ?? 0} />
           </div>
           <h2>Recent Executions</h2>
           <ExecutionTable executions={executions.slice(0, 10)} agents={agents} onSelect={openDetail} statusColor={statusColor} />
@@ -127,11 +127,11 @@ export default function App() {
                 <tr key={a.id} onClick={() => { setSelectedAgent(a); setPage("agent-detail"); }}
                   style={{ borderBottom: "1px solid #eee", cursor: "pointer" }}>
                   <td style={{ padding: "0.5rem" }}>{(a.name || "").split("_")[0] ?? "-"}</td>
-                  <td style={{ padding: "0.5rem", fontWeight: 500 }}>{a.display_name || a.name}</td>
-                  <td style={{ padding: "0.5rem", fontFamily: "monospace", fontSize: "0.85rem" }}>{a.cron_expression || "manual"}</td>
+                  <td style={{ padding: "0.5rem", fontWeight: 500 }}>{a.displayName || a.name}</td>
+                  <td style={{ padding: "0.5rem", fontFamily: "monospace", fontSize: "0.85rem" }}>{a.cronExpression || "manual"}</td>
                   <td style={{ padding: "0.5rem" }}>
-                    <span style={{ color: a.enabled ? (a.executor_status === "online" ? "green" : "orange") : "gray" }}>
-                      {a.enabled ? (a.executor_status === "online" ? "● on" : "○ offline") : "◌ off"}
+                    <span style={{ color: a.enabled ? (a.executorStatus === "online" ? "green" : "orange") : "gray" }}>
+                      {a.enabled ? (a.executorStatus === "online" ? "● on" : "○ offline") : "◌ off"}
                     </span>
                   </td>
                   <td style={{ padding: "0.5rem" }}>
@@ -163,11 +163,11 @@ export default function App() {
           <h2>Execution Detail</h2>
           <div style={{ background: "#f5f5f5", padding: "1rem", borderRadius: "8px", marginBottom: "1rem" }}>
             <p>Status: {statusColor(selectedExecution.status)} {selectedExecution.status}</p>
-            <p>Duration: {selectedExecution.duration_ms ? `${selectedExecution.duration_ms}ms` : "N/A"}</p>
-            <p>Trigger: {selectedExecution.trigger_type} — {selectedExecution.triggered_by ?? "-"}</p>
-            {selectedExecution.error_message && <p style={{ color: "red" }}>Error: {selectedExecution.error_message}</p>}
-            {selectedExecution.result_summary && <p>Result: {selectedExecution.result_summary}</p>}
-            <p>Traces: {selectedExecution.trace_count_actual ?? 0} recorded</p>
+            <p>Duration: {selectedExecution.durationMs ? `${selectedExecution.durationMs}ms` : "N/A"}</p>
+            <p>Trigger: {selectedExecution.triggerType} — {selectedExecution.triggeredBy ?? "-"}</p>
+            {selectedExecution.errorMessage && <p style={{ color: "red" }}>Error: {selectedExecution.errorMessage}</p>}
+            {selectedExecution.resultSummary && <p>Result: {selectedExecution.resultSummary}</p>}
+            <p>Traces: {selectedExecution.traceCountActual ?? 0} recorded</p>
           </div>
           <h3>Traces</h3>
           {(!Array.isArray(traces) || traces.length === 0) && <p>No traces recorded.</p>}
@@ -188,13 +188,13 @@ export default function App() {
       {page === "agent-detail" && selectedAgent && (
         <div>
           <button onClick={() => setPage("agents")} style={{ marginBottom: "1rem" }}>&larr; Back</button>
-          <h2>{selectedAgent.display_name || selectedAgent.name}</h2>
+          <h2>{selectedAgent.displayName || selectedAgent.name}</h2>
           <div style={{ background: "#f5f5f5", padding: "1rem", borderRadius: "8px", margin: "1rem 0" }}>
-            <p>Type: {selectedAgent.agent_type}</p>
-            <p>Cron: {selectedAgent.cron_expression || "manual only"}</p>
+            <p>Type: {selectedAgent.agentType}</p>
+            <p>Cron: {selectedAgent.cronExpression || "manual only"}</p>
             <p>Status: {selectedAgent.enabled ? "enabled" : "disabled"}</p>
-            <p>Executor: {selectedAgent.executor_status}</p>
-            <p>Active executions: {selectedAgent.active_execution_count}</p>
+            <p>Executor: {selectedAgent.executorStatus}</p>
+            <p>Active executions: {selectedAgent.activeExecutionCount}</p>
             <div style={{ marginTop: "1rem" }}>
               <button onClick={() => patchAgent(selectedAgent.id, { enabled: !selectedAgent.enabled }).then(loadData)}
                 style={{ marginRight: "0.5rem" }}>
@@ -207,7 +207,7 @@ export default function App() {
           </div>
           <h3>Recent Executions</h3>
           <ExecutionTable
-            executions={executions.filter(e => agents.find(a => a.id === e.agent_id)?.name === selectedAgent.name).slice(0, 20)}
+            executions={executions.filter(e => agents.find(a => a.id === e.agentId)?.name === selectedAgent.name).slice(0, 20)}
             agents={agents}
             onSelect={openDetail} statusColor={statusColor} />
         </div>
@@ -243,10 +243,10 @@ function ExecutionTable({ executions, agents, onSelect, statusColor }: {
       <tbody>
         {executions.map(e => (
           <tr key={e.id} onClick={() => onSelect(e)} style={{ borderBottom: "1px solid #eee", cursor: "pointer" }}>
-            <td style={{ padding: "0.5rem" }}>{e.started_at ? new Date(e.started_at).toLocaleTimeString() : "-"}</td>
-            <td style={{ padding: "0.5rem" }}>{agentName(e.agent_id)} &mdash; {e.trigger_type}</td>
+            <td style={{ padding: "0.5rem" }}>{e.startedAt ? new Date(e.startedAt).toLocaleTimeString() : "-"}</td>
+            <td style={{ padding: "0.5rem" }}>{agentName(e.agentId)} &mdash; {e.triggerType}</td>
             <td style={{ padding: "0.5rem" }}>{statusColor(e.status)} {e.status}</td>
-            <td style={{ padding: "0.5rem" }}>{e.duration_ms ? `${e.duration_ms}ms` : "-"}</td>
+            <td style={{ padding: "0.5rem" }}>{e.durationMs ? `${e.durationMs}ms` : "-"}</td>
           </tr>
         ))}
       </tbody>
