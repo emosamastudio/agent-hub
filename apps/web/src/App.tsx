@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { fetchAgents, fetchExecutions, fetchStats, patchAgent, triggerAgent, connectSocket } from "./lib/api";
 
-type Page = "overview" | "agents" | "executions" | "detail";
+type Page = "overview" | "agents" | "executions" | "detail" | "agent-detail";
 
 interface Agent {
   id: string; name: string; display_name: string; agent_type: string;
@@ -27,6 +27,7 @@ export default function App() {
   const [traces, setTraces] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [wsConnected, setWsConnected] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const loadData = useCallback(async () => {
     const [a, e, s] = await Promise.all([fetchAgents(), fetchExecutions({ limit: "50" }), fetchStats()]);
@@ -43,6 +44,11 @@ export default function App() {
     ws.onclose = () => setWsConnected(false);
     ws.onmessage = () => loadData();
     return () => ws.close();
+  }, [loadData]);
+
+  useEffect(() => {
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
   }, [loadData]);
 
   const statusColor = (s: string) => {
@@ -85,7 +91,7 @@ export default function App() {
             <StatCard label="Failed (24h)" value={stats.recent_failures ?? 0} />
           </div>
           <h2>Recent Executions</h2>
-          <ExecutionTable executions={executions.slice(0, 10)} onSelect={openDetail} statusColor={statusColor} />
+          <ExecutionTable executions={executions.slice(0, 10)} agents={agents} onSelect={openDetail} statusColor={statusColor} />
         </div>
       )}
 
@@ -100,7 +106,8 @@ export default function App() {
             </thead>
             <tbody>
               {agents.map(a => (
-                <tr key={a.id} style={{ borderBottom: "1px solid #eee" }}>
+                <tr key={a.id} onClick={() => { setSelectedAgent(a); setPage("agent-detail"); }}
+                  style={{ borderBottom: "1px solid #eee", cursor: "pointer" }}>
                   <td style={{ padding: "0.5rem" }}>{(a.name || "").split("_")[0] ?? "-"}</td>
                   <td style={{ padding: "0.5rem", fontWeight: 500 }}>{a.display_name || a.name}</td>
                   <td style={{ padding: "0.5rem", fontFamily: "monospace", fontSize: "0.85rem" }}>{a.cron_expression || "manual"}</td>
@@ -128,7 +135,7 @@ export default function App() {
       {page === "executions" && (
         <div>
           <h2>Executions</h2>
-          <ExecutionTable executions={executions} onSelect={openDetail} statusColor={statusColor} />
+          <ExecutionTable executions={executions} agents={agents} onSelect={openDetail} statusColor={statusColor} />
         </div>
       )}
 
@@ -159,6 +166,34 @@ export default function App() {
           ))}
         </div>
       )}
+
+      {page === "agent-detail" && selectedAgent && (
+        <div>
+          <button onClick={() => setPage("agents")} style={{ marginBottom: "1rem" }}>&larr; Back</button>
+          <h2>{selectedAgent.display_name || selectedAgent.name}</h2>
+          <div style={{ background: "#f5f5f5", padding: "1rem", borderRadius: "8px", margin: "1rem 0" }}>
+            <p>Type: {selectedAgent.agent_type}</p>
+            <p>Cron: {selectedAgent.cron_expression || "manual only"}</p>
+            <p>Status: {selectedAgent.enabled ? "enabled" : "disabled"}</p>
+            <p>Executor: {selectedAgent.executor_status}</p>
+            <p>Active executions: {selectedAgent.active_execution_count}</p>
+            <div style={{ marginTop: "1rem" }}>
+              <button onClick={() => patchAgent(selectedAgent.id, { enabled: !selectedAgent.enabled }).then(loadData)}
+                style={{ marginRight: "0.5rem" }}>
+                {selectedAgent.enabled ? "Disable" : "Enable"}
+              </button>
+              <button onClick={() => triggerAgent(selectedAgent.name, {}).then(loadData)}>
+                Trigger Now
+              </button>
+            </div>
+          </div>
+          <h3>Recent Executions</h3>
+          <ExecutionTable
+            executions={executions.filter(e => agents.find(a => a.id === e.agent_id)?.name === selectedAgent.name).slice(0, 20)}
+            agents={agents}
+            onSelect={openDetail} statusColor={statusColor} />
+        </div>
+      )}
     </div>
   );
 }
@@ -172,24 +207,26 @@ function StatCard({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ExecutionTable({ executions, onSelect, statusColor }: {
+function ExecutionTable({ executions, agents, onSelect, statusColor }: {
   executions: Execution[];
+  agents: Agent[];
   onSelect: (e: Execution) => void;
   statusColor: (s: string) => string;
 }) {
+  const agentName = (agentId: string) => agents.find(a => a.id === agentId)?.display_name || agentId.slice(0, 8);
   if (!Array.isArray(executions) || executions.length === 0) return <p>No executions yet.</p>;
   return (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
       <thead>
         <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
-          <th>Time</th><th>Trigger</th><th>Status</th><th>Duration</th>
+          <th>Time</th><th>Agent</th><th>Status</th><th>Duration</th>
         </tr>
       </thead>
       <tbody>
         {executions.map(e => (
           <tr key={e.id} onClick={() => onSelect(e)} style={{ borderBottom: "1px solid #eee", cursor: "pointer" }}>
             <td style={{ padding: "0.5rem" }}>{e.started_at ? new Date(e.started_at).toLocaleTimeString() : "-"}</td>
-            <td style={{ padding: "0.5rem" }}>{e.trigger_type} — {e.triggered_by ?? "-"}</td>
+            <td style={{ padding: "0.5rem" }}>{agentName(e.agent_id)} &mdash; {e.trigger_type}</td>
             <td style={{ padding: "0.5rem" }}>{statusColor(e.status)} {e.status}</td>
             <td style={{ padding: "0.5rem" }}>{e.duration_ms ? `${e.duration_ms}ms` : "-"}</td>
           </tr>
