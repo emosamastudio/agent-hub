@@ -231,7 +231,7 @@ function ExecutionTable({ executions, agents, onSelect, statusColor }: {
   onSelect: (e: Execution) => void;
   statusColor: (s: string) => string;
 }) {
-  const agentName = (agentId: string) => agents.find(a => a.id === agentId)?.display_name || agentId.slice(0, 8);
+  const agentName = (agentId: string) => agents.find(a => a.id === agentId)?.display_name || (agentId ? agentId.slice(0, 8) : "?");
   if (!Array.isArray(executions) || executions.length === 0) return <p>No executions yet.</p>;
   return (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
