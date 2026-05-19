@@ -11,6 +11,11 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
     return;
   }
 
+  // Skip auth for WebSocket upgrade (browsers can't set auth headers on WS)
+  if (request.url === "/ws") {
+    return;
+  }
+
   // Skip auth for health and metrics
   if (request.url === "/api/health" || request.url === "/api/metrics") {
     return;

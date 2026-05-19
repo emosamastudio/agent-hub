@@ -54,6 +54,6 @@ export async function triggerAgent(name: string, payload: unknown) {
 }
 
 export function connectSocket(): WebSocket {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return new WebSocket(`${protocol}://${location.host}/ws`);
+  // Connect directly to hub WebSocket (bypass Vite proxy which doesn't forward WS upgrades)
+  return new WebSocket(`ws://localhost:8788/ws`);
 }
