@@ -15,6 +15,23 @@ Authorization: Bearer <project-api-key>
 `X-Agent-Hub-Project: <project-name>` is optional metadata. Project ownership is
 resolved from the bearer API key.
 
+Agent Hub responds to API requests with:
+
+```http
+Agent-Hub-Version: 1
+```
+
+Bearer/API-key requests that send an unsupported `Agent-Hub-Version` are
+rejected with `426 Upgrade Required` and:
+
+```json
+{
+  "error": "unsupported_agent_hub_version",
+  "requested_version": "2",
+  "supported_versions": ["1"]
+}
+```
+
 ## Go SDK Reference
 
 The Go SDK module path is:

@@ -71,9 +71,11 @@ async function api(
   url: string,
   body?: unknown,
   auth: "basic" | "bearer" | "none" = "basic",
+  extraHeaders: Record<string, string> = {},
 ) {
   const requestBody = defaultAgentDescription(method, url, body);
   const headers: Record<string, string> = {
+    ...extraHeaders,
   };
   if (auth === "basic") headers.Authorization = authHeader();
   if (auth === "bearer") headers.Authorization = apiKeyHeader();
@@ -89,6 +91,7 @@ async function api(
   return {
     status: res.statusCode,
     body: res.body ? JSON.parse(res.body) : null,
+    headers: res.headers,
   };
 }
 
@@ -109,6 +112,7 @@ async function apiWithBearer(method: string, url: string, apiKey: string, body?:
   return {
     status: res.statusCode,
     body: res.body ? JSON.parse(res.body) : null,
+    headers: res.headers,
   };
 }
 
@@ -140,6 +144,13 @@ test("GET /api/health returns ok", async () => {
   assert.strictEqual(body.status, "ok");
   assert.strictEqual(body.checks.database.status, "ok");
   assert.ok(body.uptime > 0);
+});
+
+test("API responses include Agent-Hub-Version header", async () => {
+  const { status, headers } = await api("GET", "/api/health", undefined, "none");
+
+  assert.strictEqual(status, 200);
+  assert.strictEqual(headers["agent-hub-version"], "1");
 });
 
 test("GET /api/ready returns database readiness without dashboard auth", async () => {
@@ -393,6 +404,22 @@ test("PUT /api/registry/agents rejects agents without a clear description", asyn
     path: "description",
     message: "description must be at least 10 characters",
   }]);
+});
+
+test("bearer API rejects unsupported Agent-Hub-Version", async () => {
+  const { status, body, headers } = await api("PUT", "/api/registry/agents", {
+    name: scopedName("unsupported_protocol"),
+    displayName: "Unsupported Protocol Agent",
+    description: "Runs a deterministic test handler for protocol version coverage.",
+    agentType: "cron_task",
+    handler: "unsupported_protocol_handler",
+  }, "bearer", { "Agent-Hub-Version": "2" });
+
+  assert.strictEqual(status, 426);
+  assert.strictEqual(headers["agent-hub-version"], "1");
+  assert.strictEqual(body.error, "unsupported_agent_hub_version");
+  assert.deepStrictEqual(body.supported_versions, ["1"]);
+  assert.strictEqual(body.requested_version, "2");
 });
 
 test("POST /api/agents creates a dashboard-managed agent", async () => {

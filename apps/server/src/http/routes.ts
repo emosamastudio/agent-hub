@@ -11,6 +11,7 @@ import { getSchedulerRuntimeStats } from "../services/scheduler.js";
 
 interface ExtendedAppContext extends AppContext {}
 
+const supportedAgentHubVersion = "1";
 const terminalExecutionStatuses = new Set(["success", "failed", "timeout", "cancelled"]);
 const agentArchiveFilters = new Set(["active", "include", "only"]);
 type AgentArchiveFilter = "active" | "include" | "only";
@@ -48,6 +49,11 @@ function validationErrorPayload(error: z.ZodError, code: string) {
     message: details[0]?.message ?? code,
     details,
   };
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 function generateProjectApiKey() {
@@ -289,6 +295,25 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   // ── Health ──
   let cachedProjectId: string | null = null;
 
+  app.addHook("onRequest", (_request, reply, done) => {
+    reply.header("Agent-Hub-Version", supportedAgentHubVersion);
+    done();
+  });
+
+  function rejectUnsupportedAgentHubVersion(request: FastifyRequest, reply: FastifyReply): boolean {
+    const requestedVersion = firstHeaderValue(request.headers["agent-hub-version"]);
+    if (!requestedVersion || requestedVersion === supportedAgentHubVersion) {
+      return false;
+    }
+    reply.status(426).send({
+      error: "unsupported_agent_hub_version",
+      message: `Agent-Hub-Version ${requestedVersion} is not supported`,
+      requested_version: requestedVersion,
+      supported_versions: [supportedAgentHubVersion],
+    });
+    return true;
+  }
+
   async function getDefaultProjectId(): Promise<string> {
     if (cachedProjectId) return cachedProjectId;
     const project = await ctx.projectRepo.findByName("default");
@@ -298,6 +323,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   }
 
   async function requireProjectFromApiKey(request: FastifyRequest, reply: FastifyReply) {
+    if (rejectUnsupportedAgentHubVersion(request, reply)) return null;
     const token = getBearerToken(request);
     if (!token) {
       reply.status(401).send({ error: "api_key_required" });

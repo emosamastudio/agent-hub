@@ -84,6 +84,7 @@ Register an agent:
 ```bash
 curl -X PUT http://127.0.0.1:8788/api/registry/agents \
   -H "authorization: Bearer agent_hub_dev_key" \
+  -H "Agent-Hub-Version: 1" \
   -H "content-type: application/json" \
   -d '{
     "name": "demo_agent",
@@ -101,6 +102,7 @@ Trigger work:
 ```bash
 curl -X POST http://127.0.0.1:8788/api/agents/demo_agent/trigger \
   -H "authorization: Bearer agent_hub_dev_key" \
+  -H "Agent-Hub-Version: 1" \
   -H "content-type: application/json" \
   -d '{
     "payload": { "demo": true },
@@ -114,11 +116,13 @@ Executor heartbeat and poll:
 ```bash
 curl -X POST http://127.0.0.1:8788/api/executors/heartbeat \
   -H "authorization: Bearer agent_hub_dev_key" \
+  -H "Agent-Hub-Version: 1" \
   -H "content-type: application/json" \
   -d '{ "agent_names": ["demo_agent"] }'
 
 curl "http://127.0.0.1:8788/api/executors/poll?agent_names=demo_agent" \
-  -H "authorization: Bearer agent_hub_dev_key"
+  -H "authorization: Bearer agent_hub_dev_key" \
+  -H "Agent-Hub-Version: 1"
 ```
 
 Report completion:
@@ -126,6 +130,7 @@ Report completion:
 ```bash
 curl -X POST http://127.0.0.1:8788/api/executions/<execution-id>/report \
   -H "authorization: Bearer agent_hub_dev_key" \
+  -H "Agent-Hub-Version: 1" \
   -H "content-type: application/json" \
   -d '{ "status": "success", "result_summary": "done" }'
 ```
