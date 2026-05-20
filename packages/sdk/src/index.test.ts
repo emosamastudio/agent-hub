@@ -789,6 +789,122 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("doctor returns a structured project diagnostics report", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      requests.push(url);
+      if (url === "http://hub/api/health") {
+        return jsonResponse({ status: "ok" });
+      }
+      if (url === "http://hub/api/ready") {
+        return jsonResponse({ status: "ok" });
+      }
+      if (url === "http://hub/api/metrics") {
+        return jsonResponse({
+          alerts_active: 1,
+          scheduler: {
+            running: true,
+          },
+        });
+      }
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([
+          { id: "agent-1", name: "deep_research", executorStatus: "online" },
+        ]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([
+          { agent_name: "deep_research", executor_status: "online" },
+        ]);
+      }
+      if (url === "http://hub/api/alerts?limit=20") {
+        return jsonResponse([
+          { id: 7, ruleName: "failed_runs", acknowledgedAt: null },
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.doctor({ project: "oph" })).resolves.toMatchObject({
+      ok: true,
+      serverUrl: "http://hub",
+      project: {
+        requested: "oph",
+        found: true,
+        id: "project-1",
+        name: "oph",
+      },
+      summary: {
+        errors: 0,
+        warnings: 1,
+      },
+      checks: expect.arrayContaining([
+        { name: "health", status: "ok" },
+        { name: "ready", status: "ok" },
+        { name: "scheduler", status: "ok" },
+        { name: "project", status: "ok", message: "Project oph found" },
+        { name: "alerts", status: "warning", message: "1 active alert(s)" },
+      ]),
+    });
+    expect(requests).toEqual([
+      "http://hub/api/health",
+      "http://hub/api/ready",
+      "http://hub/api/metrics",
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1",
+      "http://hub/api/executors?project=project-1",
+      "http://hub/api/alerts?limit=20",
+    ]);
+  });
+
+  test("doctor reports a missing requested project as an error", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true }, alerts_active: 0 });
+      if (url === "http://hub/api/projects") return jsonResponse([]);
+      if (url === "http://hub/api/alerts?limit=20") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.doctor({ project: "oph" })).resolves.toMatchObject({
+      ok: false,
+      project: {
+        requested: "oph",
+        found: false,
+      },
+      summary: {
+        errors: 1,
+      },
+      checks: expect.arrayContaining([
+        { name: "project", status: "error", message: "Project oph not found" },
+      ]),
+    });
+  });
+
   test("createProject and rotateProjectApiKey manage project-bound API keys", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

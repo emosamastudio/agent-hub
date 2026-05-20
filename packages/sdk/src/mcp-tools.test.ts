@@ -9,6 +9,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_health",
       "agent_hub_ready",
       "agent_hub_get_metrics",
+      "agent_hub_doctor",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",

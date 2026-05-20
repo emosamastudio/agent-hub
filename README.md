@@ -243,6 +243,7 @@ npm run build -w @agent-hub/sdk
 node packages/sdk/dist/cli.js health
 node packages/sdk/dist/cli.js ready
 node packages/sdk/dist/cli.js metrics
+node packages/sdk/dist/cli.js doctor --project oph
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -299,6 +300,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 
 `executors list` shows online executor heartbeats and active execution counts. `alerts list` and `alerts acknowledge` expose the operational alert loop for agents, so a coding agent can inspect queue/failure pressure and mark handled alerts without using the dashboard.
 
+`doctor --project <name-or-id>` runs the agent-facing deployment diagnostic in one call. It checks health, readiness, metrics, scheduler state, project discovery, registered agents, executor heartbeats, and active alerts, then returns a structured report with `ok`, `summary.errors`, `summary.warnings`, and per-check details.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` is the one-step canary form. It triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it for deployment smoke tests where copying an execution id by hand would be brittle.
@@ -328,6 +331,7 @@ Exposed tools:
 - `agent_hub_health`
 - `agent_hub_ready`
 - `agent_hub_get_metrics`
+- `agent_hub_doctor`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

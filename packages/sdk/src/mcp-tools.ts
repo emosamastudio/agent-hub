@@ -6,6 +6,7 @@ import {
   type AgentHubCreateAgentInput,
   type AgentHubCreateProjectInput,
   type AgentHubDedupPolicy,
+  type AgentHubDoctorOptions,
   type AgentHubDrainAgentOptions,
   type AgentHubListAgentsQuery,
   type AgentHubListAlertsQuery,
@@ -47,6 +48,16 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       description: "Read Agent Hub operational counters and scheduler runtime metrics for canary observation.",
       inputSchema: {},
       handler: async () => toMcpText(await client.getMetrics()),
+    },
+    {
+      name: "agent_hub_doctor",
+      description: "Run Agent Hub diagnostics across health, readiness, metrics, projects, agents, executors, and alerts.",
+      inputSchema: {
+        project: z.string().optional(),
+      },
+      handler: async (args) => toMcpText(await client.doctor(compact({
+        project: stringArg(args.project),
+      }) as AgentHubDoctorOptions)),
     },
     {
       name: "agent_hub_list_projects",

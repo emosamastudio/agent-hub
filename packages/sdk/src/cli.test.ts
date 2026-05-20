@@ -14,6 +14,19 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses doctor diagnostics", () => {
+    expect(parseCliInvocation(["doctor"])).toEqual({
+      command: "doctor",
+      options: {},
+    });
+    expect(parseCliInvocation(["doctor", "--project", "oph"])).toEqual({
+      command: "doctor",
+      options: {
+        project: "oph",
+      },
+    });
+  });
+
   test("parses trigger invocations with JSON payload and dedup options", () => {
     expect(parseCliInvocation([
       "trigger",

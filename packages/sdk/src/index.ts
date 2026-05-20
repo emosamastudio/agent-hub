@@ -190,6 +190,44 @@ export interface AgentHubMetricsSnapshot {
   scheduler: AgentHubSchedulerRuntimeMetrics;
 }
 
+export interface AgentHubDoctorOptions {
+  project?: string;
+}
+
+export type AgentHubDoctorStatus = 'ok' | 'warning' | 'error';
+
+export interface AgentHubDoctorCheck {
+  name: string;
+  status: AgentHubDoctorStatus;
+  message?: string;
+  details?: unknown;
+}
+
+export interface AgentHubDoctorReport {
+  ok: boolean;
+  generatedAt: string;
+  serverUrl: string;
+  project?: {
+    requested?: string;
+    found: boolean;
+    id?: string;
+    name?: string;
+    displayName?: string | null;
+  };
+  summary: {
+    errors: number;
+    warnings: number;
+  };
+  checks: AgentHubDoctorCheck[];
+  health?: unknown;
+  ready?: unknown;
+  metrics?: unknown;
+  projects?: unknown[];
+  agents?: unknown[];
+  executors?: unknown[];
+  alerts?: unknown[];
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -263,6 +301,20 @@ function triggerExecutionId(record: unknown): string | null {
   return typeof executionId === 'string' && executionId.length > 0 ? executionId : null;
 }
 
+function recordStatus(record: unknown): string | null {
+  if (!record || typeof record !== 'object') return null;
+  const status = (record as { status?: unknown }).status;
+  return typeof status === 'string' ? status : null;
+}
+
+function projectRecordMatches(record: AgentHubProjectRecord, project: string): boolean {
+  return record.id === project || record.name === project;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -287,6 +339,126 @@ export class AgentHubControlClient {
 
   async getMetrics(): Promise<AgentHubMetricsSnapshot> {
     return this.requestJson('GET', '/api/metrics', undefined, 'none');
+  }
+
+  async doctor(options: AgentHubDoctorOptions = {}): Promise<AgentHubDoctorReport> {
+    const checks: AgentHubDoctorCheck[] = [];
+    const report: AgentHubDoctorReport = {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      serverUrl: this.config.serverUrl,
+      summary: {
+        errors: 0,
+        warnings: 0,
+      },
+      checks,
+    };
+
+    report.health = await this.captureDoctorStep("health", checks, async () => {
+      const health = await this.health();
+      const status = recordStatus(health);
+      if (status && status !== "ok") {
+        return { value: health, check: { name: "health", status: "error", message: `Health status is ${status}` } };
+      }
+      return { value: health, check: { name: "health", status: "ok" } };
+    });
+
+    report.ready = await this.captureDoctorStep("ready", checks, async () => {
+      const ready = await this.ready();
+      const status = recordStatus(ready);
+      if (status && status !== "ok") {
+        return { value: ready, check: { name: "ready", status: "error", message: `Readiness status is ${status}` } };
+      }
+      return { value: ready, check: { name: "ready", status: "ok" } };
+    });
+
+    report.metrics = await this.captureDoctorStep("metrics", checks, async () => {
+      const metrics = await this.getMetrics();
+      const schedulerRunning = metrics.scheduler?.running;
+      if (schedulerRunning === false) {
+        return { value: metrics, check: { name: "scheduler", status: "warning", message: "Scheduler is not running" } };
+      }
+      return { value: metrics, check: { name: "scheduler", status: "ok" } };
+    });
+
+    report.projects = await this.captureDoctorStep("projects", checks, async () => {
+      const projects = await this.listProjects() as AgentHubProjectRecord[];
+      if (options.project) {
+        const project = projects.find((candidate) => projectRecordMatches(candidate, options.project as string));
+        if (!project) {
+          report.project = {
+            requested: options.project,
+            found: false,
+          };
+          return {
+            value: projects,
+            check: { name: "project", status: "error", message: `Project ${options.project} not found` },
+          };
+        }
+        report.project = {
+          requested: options.project,
+          found: true,
+          id: project.id,
+          name: project.name,
+          displayName: project.displayName,
+        };
+        return {
+          value: projects,
+          check: { name: "project", status: "ok", message: `Project ${project.name} found` },
+        };
+      }
+      return {
+        value: projects,
+        check: { name: "projects", status: "ok", message: `${projects.length} project(s)` },
+      };
+    });
+
+    const projectId = report.project?.found ? report.project.id : undefined;
+    if (!options.project || projectId) {
+      report.agents = await this.captureDoctorStep("agents", checks, async () => {
+        const agents = await this.listAgents(projectId ? { project: projectId } : {});
+        return {
+          value: agents,
+          check: {
+            name: "agents",
+            status: agents.length > 0 ? "ok" : "warning",
+            message: `${agents.length} agent(s) registered`,
+          },
+        };
+      });
+
+      report.executors = await this.captureDoctorStep("executors", checks, async () => {
+        const executors = await this.listExecutors(projectId ? { project: projectId } : {});
+        const agentCount = report.agents?.length ?? 0;
+        return {
+          value: executors,
+          check: {
+            name: "executors",
+            status: agentCount > 0 && executors.length === 0 ? "warning" : "ok",
+            message: `${executors.length} executor heartbeat(s) online`,
+          },
+        };
+      });
+    }
+
+    report.alerts = await this.captureDoctorStep("alerts", checks, async () => {
+      const alerts = await this.listAlerts({ limit: 20 });
+      return {
+        value: alerts,
+        check: {
+          name: "alerts",
+          status: alerts.length > 0 ? "warning" : "ok",
+          message: alerts.length > 0 ? `${alerts.length} active alert(s)` : "No active alerts",
+        },
+      };
+    });
+
+    report.summary = {
+      errors: checks.filter((check) => check.status === "error").length,
+      warnings: checks.filter((check) => check.status === "warning").length,
+    };
+    report.ok = report.summary.errors === 0;
+    return report;
   }
 
   async listProjects(): Promise<unknown[]> {
@@ -486,6 +658,25 @@ export class AgentHubControlClient {
     }
     const search = params.toString();
     return search ? `${path}?${search}` : path;
+  }
+
+  private async captureDoctorStep<T>(
+    name: string,
+    checks: AgentHubDoctorCheck[],
+    action: () => Promise<{ value: T; check: AgentHubDoctorCheck }>,
+  ): Promise<T | undefined> {
+    try {
+      const { value, check } = await action();
+      checks.push(check);
+      return value;
+    } catch (error) {
+      checks.push({
+        name,
+        status: "error",
+        message: errorMessage(error),
+      });
+      return undefined;
+    }
   }
 
   private async requestJson<T>(

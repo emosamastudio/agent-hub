@@ -9,6 +9,7 @@ import {
   type AgentHubCreateProjectInput,
   type AgentHubCreateAgentInput,
   type AgentHubDedupPolicy,
+  type AgentHubDoctorOptions,
   type AgentHubDrainAgentOptions,
   type AgentHubGetAgentOptions,
   type AgentHubListAgentsQuery,
@@ -32,6 +33,7 @@ type CliInvocation =
   | { command: "health" }
   | { command: "ready" }
   | { command: "metrics" }
+  | { command: "doctor"; options: AgentHubDoctorOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -104,6 +106,15 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
 
   if (root === "metrics") {
     return { command: "metrics" };
+  }
+
+  if (root === "doctor") {
+    return {
+      command: "doctor",
+      options: compactDefined({
+        project: stringFlag(parsed.flags, "project"),
+      }),
+    };
   }
 
   if (root === "projects") {
@@ -422,6 +433,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.ready();
     case "metrics":
       return client.getMetrics();
+    case "doctor":
+      return client.doctor(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -638,6 +651,7 @@ function helpText(): string {
   agent-hub health
   agent-hub ready
   agent-hub metrics
+  agent-hub doctor [--project <project-name-or-id>]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
