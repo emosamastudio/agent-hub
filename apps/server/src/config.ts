@@ -26,7 +26,7 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(currentDirectory, "..");
-const defaultDatabaseUrl = "postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub";
+export const defaultDatabaseUrl = "postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub";
 const defaultDashboardUsername = "admin";
 const defaultDashboardPassword = "admin";
 const defaultProjectApiKey = "agent_hub_dev_key";

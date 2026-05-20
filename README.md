@@ -21,6 +21,8 @@ npm run db:migrate -w @agent-hub/server
 npm run dev
 ```
 
+In production, `db:migrate` requires an explicit `DATABASE_URL` and refuses the local development database fallback.
+
 Default local endpoints:
 
 - Dashboard: `http://127.0.0.1:5174`

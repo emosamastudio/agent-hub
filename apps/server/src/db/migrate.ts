@@ -1,9 +1,12 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
+import { createMigrationConfig } from "./migration-config.js";
+
+const migrationConfig = createMigrationConfig();
 
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL ?? "postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub",
+  connectionString: migrationConfig.databaseUrl,
 });
 
 const db = drizzle(pool);

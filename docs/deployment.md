@@ -15,6 +15,9 @@ This runbook targets a personal or small-team internal deployment. The server is
 ```bash
 npm ci
 npm run build
+set -a
+. /etc/agent-hub/agent-hub.env
+set +a
 npm run db:migrate -w @agent-hub/server
 ```
 
@@ -110,6 +113,9 @@ sudo systemctl stop agent-hub
 Deploy the new build, then:
 
 ```bash
+set -a
+. /etc/agent-hub/agent-hub.env
+set +a
 npm run db:migrate -w @agent-hub/server
 sudo systemctl start agent-hub
 curl -fsS http://127.0.0.1:8788/api/ready
