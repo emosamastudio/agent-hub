@@ -681,6 +681,35 @@ describe("AgentHubControlClient", () => {
     vi.restoreAllMocks();
   });
 
+  test("ready checks the unauthenticated readiness endpoint", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(input.toString()).toBe("http://hub/api/ready");
+      expect(init?.method).toBe("GET");
+      expect(init?.headers).toMatchObject({
+        "Agent-Hub-Version": "1",
+      });
+      expect(init?.headers).not.toMatchObject({
+        Authorization: expect.any(String),
+      });
+      expect(init?.body).toBeUndefined();
+      return jsonResponse({ status: "ok", checks: { database: { status: "ok" } } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.ready()).resolves.toEqual({
+      status: "ok",
+      checks: { database: { status: "ok" } },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test("listProjects reads sanitized project records from the dashboard endpoint", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(input.toString()).toBe("http://hub/api/projects");

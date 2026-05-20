@@ -2,6 +2,12 @@ import { describe, expect, test } from "vitest";
 import { buildControlConfig, parseCliInvocation } from "./cli";
 
 describe("agent-hub CLI", () => {
+  test("parses readiness checks", () => {
+    expect(parseCliInvocation(["ready"])).toEqual({
+      command: "ready",
+    });
+  });
+
   test("parses trigger invocations with JSON payload and dedup options", () => {
     expect(parseCliInvocation([
       "trigger",

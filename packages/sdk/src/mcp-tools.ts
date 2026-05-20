@@ -36,6 +36,12 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       handler: async () => toMcpText(await client.health()),
     },
     {
+      name: "agent_hub_ready",
+      description: "Check whether Agent Hub is ready to serve traffic, including database readiness.",
+      inputSchema: {},
+      handler: async () => toMcpText(await client.ready()),
+    },
+    {
       name: "agent_hub_list_projects",
       description: "List Agent Hub projects without exposing API key hashes or plaintext keys.",
       inputSchema: {},

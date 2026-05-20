@@ -5,6 +5,7 @@ This runbook targets a personal or small-team internal deployment. The server is
 ## Production Defaults
 
 - `NODE_ENV=production` disables default project/demo seeding unless explicitly enabled.
+- Production startup fails fast unless `DATABASE_URL`, `AGENT_HUB_DASHBOARD_PASSWORD`, and `AGENT_HUB_DEFAULT_API_KEY` are explicit non-development values.
 - `/api/health` and `/api/ready` are unauthenticated and include PostgreSQL readiness.
 - `SIGTERM` and `SIGINT` stop the scheduler, close Fastify, and close the PostgreSQL pool.
 - Project API keys should be created per consumer project. Do not share the development key.
@@ -50,6 +51,7 @@ Verify:
 
 ```bash
 curl -fsS http://127.0.0.1:8788/api/ready
+node packages/sdk/dist/cli.js ready
 systemctl status agent-hub
 journalctl -u agent-hub -n 100 --no-pager
 ```

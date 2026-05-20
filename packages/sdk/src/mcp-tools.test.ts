@@ -7,6 +7,7 @@ describe("Agent Hub MCP tools", () => {
 
     expect(tools.map((tool) => tool.name)).toEqual([
       "agent_hub_health",
+      "agent_hub_ready",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -30,6 +31,27 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_cancel_execution",
       "agent_hub_rerun_execution",
     ]);
+  });
+
+  test("readiness tool checks service readiness", async () => {
+    const ready = vi.fn(async () => ({
+      status: "ok",
+      checks: { database: { status: "ok" } },
+    }));
+    const tools = createAgentHubMcpTools({ ready } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_ready")?.handler({})).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: "ok",
+            checks: { database: { status: "ok" } },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(ready).toHaveBeenCalledWith();
   });
 
   test("project list tool reads sanitized project records", async () => {

@@ -210,6 +210,10 @@ export class AgentHubControlClient {
     return this.requestJson('GET', '/api/health', undefined, 'none');
   }
 
+  async ready(): Promise<unknown> {
+    return this.requestJson('GET', '/api/ready', undefined, 'none');
+  }
+
   async listProjects(): Promise<unknown[]> {
     return this.requestJson('GET', '/api/projects', undefined, 'dashboard');
   }

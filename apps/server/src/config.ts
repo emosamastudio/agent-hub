@@ -26,6 +26,10 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(currentDirectory, "..");
+const defaultDatabaseUrl = "postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub";
+const defaultDashboardUsername = "admin";
+const defaultDashboardPassword = "admin";
+const defaultProjectApiKey = "agent_hub_dev_key";
 
 type Env = Record<string, string | undefined>;
 
@@ -40,14 +44,14 @@ export function createServerConfig(env: Env = process.env) {
     bootstrapDefaultProject && !production,
   );
 
-  return {
+  const config = {
     appRoot,
     host: env.AGENT_HUB_HOST ?? "127.0.0.1",
     port: parsePositiveInt(env.AGENT_HUB_PORT, 8788),
-    databaseUrl: env.DATABASE_URL ?? "postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub",
-    dashboardUsername: env.AGENT_HUB_DASHBOARD_USER ?? "admin",
-    dashboardPassword: env.AGENT_HUB_DASHBOARD_PASSWORD ?? "admin",
-    defaultProjectApiKey: env.AGENT_HUB_DEFAULT_API_KEY ?? "agent_hub_dev_key",
+    databaseUrl: env.DATABASE_URL ?? defaultDatabaseUrl,
+    dashboardUsername: env.AGENT_HUB_DASHBOARD_USER ?? defaultDashboardUsername,
+    dashboardPassword: env.AGENT_HUB_DASHBOARD_PASSWORD ?? defaultDashboardPassword,
+    defaultProjectApiKey: env.AGENT_HUB_DEFAULT_API_KEY ?? defaultProjectApiKey,
     schedulerTickMs: parsePositiveInt(env.AGENT_HUB_SCHEDULER_TICK_MS, 1000),
     executionRetentionDays: parsePositiveInt(env.AGENT_HUB_EXECUTION_RETENTION_DAYS, 90),
     traceRetentionDays: parsePositiveInt(env.AGENT_HUB_TRACE_RETENTION_DAYS, 30),
@@ -56,6 +60,37 @@ export function createServerConfig(env: Env = process.env) {
     bootstrapDefaultProject,
     seedDemoAgent,
   } as const;
+
+  if (production) {
+    validateProductionConfig(env, config);
+  }
+
+  return config;
+}
+
+function validateProductionConfig(
+  env: Env,
+  config: {
+    databaseUrl: string;
+    dashboardPassword: string;
+    defaultProjectApiKey: string;
+  },
+) {
+  const invalidFields: string[] = [];
+
+  if (!env.DATABASE_URL || config.databaseUrl === defaultDatabaseUrl) {
+    invalidFields.push("DATABASE_URL");
+  }
+  if (!env.AGENT_HUB_DASHBOARD_PASSWORD || config.dashboardPassword === defaultDashboardPassword) {
+    invalidFields.push("AGENT_HUB_DASHBOARD_PASSWORD");
+  }
+  if (!env.AGENT_HUB_DEFAULT_API_KEY || config.defaultProjectApiKey === defaultProjectApiKey) {
+    invalidFields.push("AGENT_HUB_DEFAULT_API_KEY");
+  }
+
+  if (invalidFields.length > 0) {
+    throw new Error(`Production Agent Hub config requires explicit non-development values for ${invalidFields.join(", ")}`);
+  }
 }
 
 export const serverConfig = createServerConfig();

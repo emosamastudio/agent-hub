@@ -35,7 +35,7 @@ Default development credentials:
 
 Override these in `.env` before exposing the server beyond localhost.
 
-For an internal stable deployment, use the production runbook in [`docs/deployment.md`](docs/deployment.md). Production mode does not seed the default project or demo agent unless `AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT=true` is set explicitly.
+For an internal stable deployment, use the production runbook in [`docs/deployment.md`](docs/deployment.md). Production mode does not seed the default project or demo agent unless `AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT=true` is set explicitly, and the server refuses to start with development database/auth/API-key defaults.
 
 ## Core model
 
@@ -225,6 +225,7 @@ Use `--once` to register the demo agent and process at most one queued execution
 npm run build -w @agent-hub/sdk
 
 node packages/sdk/dist/cli.js health
+node packages/sdk/dist/cli.js ready
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -294,6 +295,7 @@ npm run hub:mcp
 Exposed tools:
 
 - `agent_hub_health`
+- `agent_hub_ready`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

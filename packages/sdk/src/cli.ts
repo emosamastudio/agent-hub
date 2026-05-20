@@ -29,6 +29,7 @@ type CliFlags = Record<string, CliFlagValue>;
 type CliInvocation =
   | { command: "help" }
   | { command: "health" }
+  | { command: "ready" }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -86,6 +87,10 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
 
   if (root === "health") {
     return { command: "health" };
+  }
+
+  if (root === "ready") {
+    return { command: "ready" };
   }
 
   if (root === "projects") {
@@ -373,6 +378,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
   switch (invocation.command) {
     case "health":
       return client.health();
+    case "ready":
+      return client.ready();
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -583,6 +590,7 @@ function compactDefined<T extends Record<string, unknown>>(query: T): T {
 function helpText(): string {
   return `Usage:
   agent-hub health
+  agent-hub ready
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
