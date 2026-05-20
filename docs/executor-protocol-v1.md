@@ -215,20 +215,19 @@ Stable success response:
 
 ## Manual Integration Test
 
-After OPH registers `deep_research`, create a queued execution:
+After OPH registers `deep_research`, create a queued execution and wait for its terminal status:
 
 ```bash
 node packages/sdk/dist/cli.js trigger deep_research \
   --api-key "$AGENT_HUB_API_KEY" \
   --payload '{"repo_name":"agent-hub-smoke"}' \
-  --dedup-policy allow_duplicate
+  --dedup-policy allow_duplicate \
+  --wait \
+  --timeout-ms 600000 \
+  --require-success
 ```
 
-Then OPH should be able to poll and report it through the Go SDK. Use the returned execution id to wait for the terminal status:
-
-```bash
-node packages/sdk/dist/cli.js executions wait <execution-id> --timeout-ms 600000 --require-success
-```
+Then OPH should be able to poll and report it through the Go SDK before the wait timeout expires.
 
 Useful checks:
 

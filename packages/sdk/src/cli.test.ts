@@ -29,6 +29,32 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses trigger-and-wait invocations for canaries", () => {
+    expect(parseCliInvocation([
+      "trigger",
+      "demo_agent",
+      "--payload",
+      "{\"value\":42}",
+      "--wait",
+      "--timeout-ms",
+      "60000",
+      "--interval-ms",
+      "250",
+      "--require-success",
+    ])).toEqual({
+      command: "trigger:wait",
+      agentName: "demo_agent",
+      triggerOptions: {
+        payload: { value: 42 },
+      },
+      waitOptions: {
+        timeoutMs: 60000,
+        intervalMs: 250,
+        requireSuccess: true,
+      },
+    });
+  });
+
   test("parses execution cancel and rerun invocations", () => {
     expect(parseCliInvocation(["executions", "cancel", "exec-1"])).toEqual({
       command: "executions:cancel",

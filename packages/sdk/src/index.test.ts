@@ -1044,6 +1044,59 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("triggerAgentAndWait triggers work then waits for the terminal execution", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(input.toString());
+      if (input.toString() === "http://hub/api/agents/demo_agent/trigger") {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({ execution_id: "exec-1", status: "queued", duplicate: false }, { status: 202 });
+      }
+      if (input.toString() === "http://hub/api/executions/exec-1") {
+        return jsonResponse({ id: "exec-1", status: "success", resultSummary: "done" });
+      }
+      throw new Error(`Unexpected request: ${input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.triggerAgentAndWait("demo_agent", {
+      payload: { value: 42 },
+    }, {
+      intervalMs: 0,
+      timeoutMs: 1000,
+      requireSuccess: true,
+    })).resolves.toEqual({
+      trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+      execution: { id: "exec-1", status: "success", resultSummary: "done" },
+    });
+    expect(requests).toEqual([
+      "http://hub/api/agents/demo_agent/trigger",
+      "http://hub/api/executions/exec-1",
+    ]);
+  });
+
+  test("triggerAgentAndWait rejects if the trigger response lacks an execution id", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "queued" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.triggerAgentAndWait("demo_agent")).rejects.toThrow(/did not include execution_id/);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test("setAgentEnabled patches the dashboard agent endpoint", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(input.toString()).toBe("http://hub/api/agents/agent-1");

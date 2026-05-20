@@ -53,7 +53,13 @@ type CliInvocation =
   | { command: "executions:cancel"; executionId: string }
   | { command: "executions:rerun"; executionId: string }
   | { command: "traces:list"; executionId: string }
-  | { command: "trigger"; agentName: string; options: AgentHubTriggerOptions };
+  | { command: "trigger"; agentName: string; options: AgentHubTriggerOptions }
+  | {
+    command: "trigger:wait";
+    agentName: string;
+    triggerOptions: AgentHubTriggerOptions;
+    waitOptions: AgentHubWaitExecutionOptions;
+  };
 
 interface ParsedArgs {
   positionals: string[];
@@ -351,14 +357,27 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
 
   if (root === "trigger") {
     if (!subcommand) throw new Error("Usage: agent-hub trigger <agent-name> [--payload '{...}']");
+    const triggerOptions = compactQuery({
+      payload: parsePayload(stringFlag(parsed.flags, "payload")),
+      idempotencyKey: stringFlag(parsed.flags, "idempotency-key"),
+      dedupPolicy: parseDedupPolicy(stringFlag(parsed.flags, "dedup-policy")),
+    });
+    if (parsed.flags.wait === true) {
+      return {
+        command: "trigger:wait",
+        agentName: subcommand,
+        triggerOptions,
+        waitOptions: compactDefined({
+          timeoutMs: numberFlag(parsed.flags, "timeout-ms"),
+          intervalMs: numberFlag(parsed.flags, "interval-ms"),
+          requireSuccess: parsed.flags["require-success"] === true ? true : undefined,
+        }),
+      };
+    }
     return {
       command: "trigger",
       agentName: subcommand,
-      options: compactQuery({
-        payload: parsePayload(stringFlag(parsed.flags, "payload")),
-        idempotencyKey: stringFlag(parsed.flags, "idempotency-key"),
-        dedupPolicy: parseDedupPolicy(stringFlag(parsed.flags, "dedup-policy")),
-      }),
+      options: triggerOptions,
     };
   }
 
@@ -440,6 +459,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.getExecutionTraces(invocation.executionId);
     case "trigger":
       return client.triggerAgent(invocation.agentName, invocation.options);
+    case "trigger:wait":
+      return client.triggerAgentAndWait(invocation.agentName, invocation.triggerOptions, invocation.waitOptions);
     case "help":
       return {};
   }
@@ -630,7 +651,7 @@ function helpText(): string {
   agent-hub executions cancel <execution-id>
   agent-hub executions rerun <execution-id>
   agent-hub traces list <execution-id>
-  agent-hub trigger <agent-name> [--payload '{"key":"value"}'] [--idempotency-key <key>] [--dedup-policy skip_if_running]
+  agent-hub trigger <agent-name> [--payload '{"key":"value"}'] [--idempotency-key <key>] [--dedup-policy skip_if_running] [--wait] [--timeout-ms 600000] [--interval-ms 1000] [--require-success]
 
 Connection:
   --url <url>                         Defaults to AGENT_HUB_URL or ${DEFAULT_URL}

@@ -269,6 +269,12 @@ node packages/sdk/dist/cli.js trigger demo_agent \
   --payload '{"source":"cli"}' \
   --idempotency-key demo:cli \
   --dedup-policy skip_if_running
+node packages/sdk/dist/cli.js trigger demo_agent \
+  --payload '{"source":"canary"}' \
+  --dedup-policy allow_duplicate \
+  --wait \
+  --timeout-ms 600000 \
+  --require-success
 ```
 
 `agents drain` disables scheduling and executor polling for an agent, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided. `agents delete` and registry deregistration refuse agents that still have queued or running executions. Cancel or drain active work before deleting an agent. Once accepted, delete/deregister archives the agent, removes it from active dashboard/API lists, disables scheduling and executor polling for it, and preserves terminal execution/trace history for audit. Use `agents list --archived only` and `agents get --include-archived` to inspect archived agents and their retained history.
@@ -278,6 +284,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 `executors list` shows online executor heartbeats and active execution counts. `alerts list` and `alerts acknowledge` expose the operational alert loop for agents, so a coding agent can inspect queue/failure pressure and mark handled alerts without using the dashboard.
 
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
+
+`trigger --wait` is the one-step canary form. It triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it for deployment smoke tests where copying an execution id by hand would be brittle.
 
 `projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
 
@@ -321,6 +329,7 @@ Exposed tools:
 - `agent_hub_wait_execution`
 - `agent_hub_list_traces`
 - `agent_hub_trigger_agent`
+- `agent_hub_trigger_and_wait_agent`
 - `agent_hub_set_agent_enabled`
 - `agent_hub_cancel_execution`
 - `agent_hub_rerun_execution`

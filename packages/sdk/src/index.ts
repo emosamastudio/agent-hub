@@ -130,6 +130,13 @@ export interface AgentHubTriggerOptions {
   dedupPolicy?: AgentHubDedupPolicy;
 }
 
+export interface AgentHubTriggerResult {
+  execution_id: string;
+  status: string;
+  duplicate?: boolean;
+  [key: string]: unknown;
+}
+
 export interface AgentHubSchedulePreviewOptions {
   limit?: number;
 }
@@ -142,6 +149,11 @@ export interface AgentHubWaitExecutionOptions {
   timeoutMs?: number;
   intervalMs?: number;
   requireSuccess?: boolean;
+}
+
+export interface AgentHubTriggerAndWaitResult {
+  trigger: AgentHubTriggerResult;
+  execution: unknown;
 }
 
 export interface AgentHubDrainAgentResult {
@@ -208,6 +220,12 @@ function executionStatus(record: unknown): string | null {
   if (!record || typeof record !== 'object') return null;
   const status = (record as { status?: unknown }).status;
   return typeof status === 'string' ? status : null;
+}
+
+function triggerExecutionId(record: unknown): string | null {
+  if (!record || typeof record !== 'object') return null;
+  const executionId = (record as { execution_id?: unknown }).execution_id;
+  return typeof executionId === 'string' && executionId.length > 0 ? executionId : null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -383,8 +401,8 @@ export class AgentHubControlClient {
     return this.requestJson('GET', `/api/executions/${encodeURIComponent(executionId)}/traces`, undefined, 'dashboard');
   }
 
-  async triggerAgent(agentName: string, options: AgentHubTriggerOptions = {}): Promise<unknown> {
-    return this.requestJson(
+  async triggerAgent(agentName: string, options: AgentHubTriggerOptions = {}): Promise<AgentHubTriggerResult> {
+    return this.requestJson<AgentHubTriggerResult>(
       'POST',
       `/api/agents/${encodeURIComponent(agentName)}/trigger`,
       {
@@ -395,6 +413,22 @@ export class AgentHubControlClient {
       'apiKey',
       { 'X-Trigger-Source': 'cli' },
     );
+  }
+
+  async triggerAgentAndWait(
+    agentName: string,
+    triggerOptions: AgentHubTriggerOptions = {},
+    waitOptions: AgentHubWaitExecutionOptions = {},
+  ): Promise<AgentHubTriggerAndWaitResult> {
+    const trigger = await this.triggerAgent(agentName, triggerOptions);
+    const executionId = triggerExecutionId(trigger);
+    if (!executionId) {
+      throw new Error(`Agent Hub trigger response for ${agentName} did not include execution_id`);
+    }
+    return {
+      trigger,
+      execution: await this.waitForExecution(executionId, waitOptions),
+    };
   }
 
   async cancelExecution(executionId: string): Promise<unknown> {

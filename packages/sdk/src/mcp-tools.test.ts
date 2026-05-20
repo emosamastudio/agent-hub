@@ -28,6 +28,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_wait_execution",
       "agent_hub_list_traces",
       "agent_hub_trigger_agent",
+      "agent_hub_trigger_and_wait_agent",
       "agent_hub_set_agent_enabled",
       "agent_hub_cancel_execution",
       "agent_hub_rerun_execution",
@@ -312,6 +313,44 @@ describe("Agent Hub MCP tools", () => {
       payload: { value: 42 },
       idempotencyKey: "manual-42",
       dedupPolicy: "skip_if_exists",
+    });
+  });
+
+  test("trigger-and-wait tool forwards trigger and polling options", async () => {
+    const triggerAgentAndWait = vi.fn(async () => ({
+      trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+      execution: { id: "exec-1", status: "success" },
+    }));
+    const tools = createAgentHubMcpTools({ triggerAgentAndWait } as any);
+    const triggerAndWaitTool = tools.find((tool) => tool.name === "agent_hub_trigger_and_wait_agent");
+
+    await expect(triggerAndWaitTool?.handler({
+      agentName: "demo_agent",
+      payload: { value: 42 },
+      idempotencyKey: "manual-42",
+      dedupPolicy: "allow_duplicate",
+      timeoutMs: 60000,
+      intervalMs: 250,
+      requireSuccess: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+            execution: { id: "exec-1", status: "success" },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(triggerAgentAndWait).toHaveBeenCalledWith("demo_agent", {
+      payload: { value: 42 },
+      idempotencyKey: "manual-42",
+      dedupPolicy: "allow_duplicate",
+    }, {
+      timeoutMs: 60000,
+      intervalMs: 250,
+      requireSuccess: true,
     });
   });
 

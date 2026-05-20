@@ -351,6 +351,28 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       })),
     },
     {
+      name: "agent_hub_trigger_and_wait_agent",
+      description: "Trigger an agent and poll the created execution until it reaches a terminal status.",
+      inputSchema: {
+        agentName: z.string().min(1),
+        payload: z.record(z.string(), z.unknown()).optional(),
+        idempotencyKey: z.string().optional(),
+        dedupPolicy: z.enum(["skip_if_running", "skip_if_exists", "allow_duplicate"]).optional(),
+        timeoutMs: z.number().int().min(0).optional(),
+        intervalMs: z.number().int().min(0).optional(),
+        requireSuccess: z.boolean().optional(),
+      },
+      handler: async (args) => toMcpText(await client.triggerAgentAndWait(args.agentName as string, {
+        payload: recordArg(args.payload),
+        idempotencyKey: stringArg(args.idempotencyKey),
+        dedupPolicy: dedupPolicyArg(args.dedupPolicy),
+      }, compactDefined({
+        timeoutMs: numberArg(args.timeoutMs),
+        intervalMs: numberArg(args.intervalMs),
+        requireSuccess: booleanArg(args.requireSuccess),
+      }) as AgentHubWaitExecutionOptions)),
+    },
+    {
       name: "agent_hub_set_agent_enabled",
       description: "Enable or disable an agent by id.",
       inputSchema: {
