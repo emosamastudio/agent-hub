@@ -3,9 +3,15 @@ import { projects, agents, providerPricing } from "./schema.js";
 import { serverConfig } from "../config.js";
 import { hashApiKey, hashPassword } from "../security.js";
 
-export async function seedIfEmpty(db: Db) {
+export interface SeedOptions {
+  bootstrapDefaultProject: boolean;
+  seedDemoAgent: boolean;
+}
+
+export async function seedIfEmpty(db: Db, options: SeedOptions = serverConfig) {
   const existing = await db.select().from(projects).limit(1);
   if (existing.length > 0) return;
+  if (!options.bootstrapDefaultProject) return;
 
   const [proj] = await db.insert(projects).values({
     name: "default",
@@ -15,19 +21,21 @@ export async function seedIfEmpty(db: Db) {
     dashboardPasswordHash: hashPassword(serverConfig.dashboardPassword),
   }).returning();
 
-  await db.insert(agents).values({
-    projectId: proj.id,
-    name: "demo_hello",
-    displayName: "Demo Hello World",
-    agentType: "cron_task",
-    cronExpression: "*/5 * * * *",
-    handlerName: "demo_handler",
-    concurrency: 1,
-    timeoutSeconds: 60,
-    retryMax: 2,
-    executorStatus: "offline",
-    enabled: true,
-  } as any);
+  if (options.seedDemoAgent) {
+    await db.insert(agents).values({
+      projectId: proj.id,
+      name: "demo_hello",
+      displayName: "Demo Hello World",
+      agentType: "cron_task",
+      cronExpression: "*/5 * * * *",
+      handlerName: "demo_handler",
+      concurrency: 1,
+      timeoutSeconds: 60,
+      retryMax: 2,
+      executorStatus: "offline",
+      enabled: true,
+    } as any);
+  }
 
   // Seed provider pricing (major LLM providers, 2026 estimates)
   const pricingData = [
@@ -53,5 +61,5 @@ export async function seedIfEmpty(db: Db) {
     console.log(`Seeded ${pricingData.length} provider pricing records`);
   }
 
-  console.log("Seeded default project and demo agent");
+  console.log(options.seedDemoAgent ? "Seeded default project and demo agent" : "Seeded default project");
 }

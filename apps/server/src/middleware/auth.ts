@@ -41,7 +41,7 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
   }
 
   // Skip auth for health and metrics
-  if (request.url === "/api/health" || request.url === "/api/metrics") {
+  if (request.url === "/api/health" || request.url === "/api/ready" || request.url === "/api/metrics") {
     return;
   }
 

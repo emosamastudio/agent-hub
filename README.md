@@ -26,6 +26,7 @@ Default local endpoints:
 - Dashboard: `http://127.0.0.1:5174`
 - Server: `http://127.0.0.1:8788`
 - Health: `http://127.0.0.1:8788/api/health`
+- Readiness: `http://127.0.0.1:8788/api/ready`
 
 Default development credentials:
 
@@ -33,6 +34,8 @@ Default development credentials:
 - SDK/API key: `agent_hub_dev_key`
 
 Override these in `.env` before exposing the server beyond localhost.
+
+For an internal stable deployment, use the production runbook in [`docs/deployment.md`](docs/deployment.md). Production mode does not seed the default project or demo agent unless `AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT=true` is set explicitly.
 
 ## Core model
 
@@ -63,9 +66,12 @@ AGENT_HUB_DASHBOARD_PASSWORD=admin
 VITE_AGENT_HUB_DASHBOARD_USER=admin
 VITE_AGENT_HUB_DASHBOARD_PASSWORD=admin
 AGENT_HUB_DEFAULT_API_KEY=agent_hub_dev_key
+AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT=true
+AGENT_HUB_SEED_DEMO_AGENT=true
 AGENT_HUB_SCHEDULER_TICK_MS=1000
 AGENT_HUB_EXECUTION_RETENTION_DAYS=90
 AGENT_HUB_TRACE_RETENTION_DAYS=30
+AGENT_HUB_ALERT_RETENTION_DAYS=180
 AGENT_HUB_MAX_TRIGGER_DEPTH=5
 ```
 

@@ -99,6 +99,34 @@ function scheduleStateFor(
   return dueRunAt ? "due" : "scheduled";
 }
 
+async function healthPayload(ctx: ExtendedAppContext) {
+  await ctx.db.execute(sql`SELECT 1`);
+  return {
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    checks: {
+      database: {
+        status: "ok",
+      },
+    },
+  };
+}
+
+function healthErrorPayload(error: unknown) {
+  return {
+    status: "error",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    checks: {
+      database: {
+        status: "error",
+        message: error instanceof Error ? error.message : "database check failed",
+      },
+    },
+  };
+}
+
 const agentSpecSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
@@ -306,9 +334,21 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   }
   (globalThis as any).__hubBroadcast = broadcast;
 
-  app.get("/api/health", async () => ({
-    status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString(),
-  }));
+  app.get("/api/health", async (_request, reply) => {
+    try {
+      return await healthPayload(ctx);
+    } catch (error) {
+      return reply.status(503).send(healthErrorPayload(error));
+    }
+  });
+
+  app.get("/api/ready", async (_request, reply) => {
+    try {
+      return await healthPayload(ctx);
+    } catch (error) {
+      return reply.status(503).send(healthErrorPayload(error));
+    }
+  });
 
   // ── Metrics ──
   app.get("/api/metrics", async () => {

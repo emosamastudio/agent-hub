@@ -18,5 +18,8 @@ export function getPool(): pg.Pool {
 }
 
 export async function closePool(): Promise<void> {
-  if (pool) await pool.end();
+  if (!pool) return;
+  const currentPool = pool;
+  pool = null;
+  await currentPool.end();
 }

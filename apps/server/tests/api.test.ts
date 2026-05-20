@@ -116,7 +116,15 @@ test("GET /api/health returns ok", async () => {
   const { status, body } = await api("GET", "/api/health");
   assert.strictEqual(status, 200);
   assert.strictEqual(body.status, "ok");
+  assert.strictEqual(body.checks.database.status, "ok");
   assert.ok(body.uptime > 0);
+});
+
+test("GET /api/ready returns database readiness without dashboard auth", async () => {
+  const { status, body } = await api("GET", "/api/ready", undefined, "none");
+  assert.strictEqual(status, 200);
+  assert.strictEqual(body.status, "ok");
+  assert.strictEqual(body.checks.database.status, "ok");
 });
 
 test("GET /api/metrics returns agent counts", async () => {

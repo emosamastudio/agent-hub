@@ -13,3 +13,21 @@ test("honors AGENT_HUB_PORT override", () => {
 
   assert.equal(config.port, 9876);
 });
+
+test("disables bootstrap seed data by default in production", () => {
+  const config = createServerConfig({ NODE_ENV: "production" });
+
+  assert.equal(config.bootstrapDefaultProject, false);
+  assert.equal(config.seedDemoAgent, false);
+});
+
+test("allows explicit production bootstrap for first install", () => {
+  const config = createServerConfig({
+    NODE_ENV: "production",
+    AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT: "true",
+    AGENT_HUB_SEED_DEMO_AGENT: "false",
+  });
+
+  assert.equal(config.bootstrapDefaultProject, true);
+  assert.equal(config.seedDemoAgent, false);
+});

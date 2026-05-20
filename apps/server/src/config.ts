@@ -6,12 +6,40 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+      return false;
+    default:
+      return fallback;
+  }
+}
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(currentDirectory, "..");
 
 type Env = Record<string, string | undefined>;
 
 export function createServerConfig(env: Env = process.env) {
+  const production = env.NODE_ENV === "production";
+  const bootstrapDefaultProject = parseBoolean(
+    env.AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT,
+    !production,
+  );
+  const seedDemoAgent = parseBoolean(
+    env.AGENT_HUB_SEED_DEMO_AGENT,
+    bootstrapDefaultProject && !production,
+  );
+
   return {
     appRoot,
     host: env.AGENT_HUB_HOST ?? "127.0.0.1",
@@ -25,6 +53,8 @@ export function createServerConfig(env: Env = process.env) {
     traceRetentionDays: parsePositiveInt(env.AGENT_HUB_TRACE_RETENTION_DAYS, 30),
     alertRetentionDays: parsePositiveInt(env.AGENT_HUB_ALERT_RETENTION_DAYS, 180),
     maxTriggerDepth: parsePositiveInt(env.AGENT_HUB_MAX_TRIGGER_DEPTH, 5),
+    bootstrapDefaultProject,
+    seedDemoAgent,
   } as const;
 }
 
