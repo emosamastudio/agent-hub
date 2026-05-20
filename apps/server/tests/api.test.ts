@@ -388,6 +388,11 @@ test("PUT /api/registry/agents rejects agents without a clear description", asyn
 
   assert.strictEqual(status, 400);
   assert.strictEqual(body.error, "invalid_agent_spec");
+  assert.strictEqual(body.message, "description must be at least 10 characters");
+  assert.deepStrictEqual(body.details, [{
+    path: "description",
+    message: "description must be at least 10 characters",
+  }]);
 });
 
 test("POST /api/agents creates a dashboard-managed agent", async () => {

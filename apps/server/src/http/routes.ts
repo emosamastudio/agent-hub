@@ -38,6 +38,18 @@ function queryFlag(value: unknown): boolean {
   return value === true || value === "true" || value === "1" || value === "yes";
 }
 
+function validationErrorPayload(error: z.ZodError, code: string) {
+  const details = error.issues.map((issue) => ({
+    path: issue.path.join("."),
+    message: issue.message,
+  }));
+  return {
+    error: code,
+    message: details[0]?.message ?? code,
+    details,
+  };
+}
+
 function generateProjectApiKey() {
   return `agh_${randomBytes(24).toString("base64url")}`;
 }
@@ -131,7 +143,9 @@ function healthErrorPayload(error: unknown) {
 const agentSpecSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
-  description: z.string().trim().min(10).max(1000),
+  description: z.string().trim()
+    .min(10, "description must be at least 10 characters")
+    .max(1000, "description must be at most 1000 characters"),
   agentType: z.enum(["cron_task", "llm_agent"]),
   cron: z.string().optional(),
   handler: z.string().optional(),
@@ -175,7 +189,9 @@ const dashboardAgentCreateSchema = z.object({
   projectId: z.string().uuid().optional(),
   name: z.string().min(1),
   displayName: z.string().min(1),
-  description: z.string().trim().min(10).max(1000),
+  description: z.string().trim()
+    .min(10, "description must be at least 10 characters")
+    .max(1000, "description must be at most 1000 characters"),
   agentType: z.enum(["cron_task", "llm_agent"]).default("cron_task"),
   cronExpression: z.string().min(1).nullable().optional(),
   handlerName: z.string().min(1).nullable().optional(),
@@ -451,7 +467,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     if (!project) return;
     const parsed = agentSpecSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: "invalid_agent_spec" });
+      return reply.status(400).send(validationErrorPayload(parsed.error, "invalid_agent_spec"));
     }
     const body = parsed.data;
     if (body.cron) {
@@ -819,7 +835,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   app.post("/api/agents", async (request, reply) => {
     const parsed = dashboardAgentCreateSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: "invalid_agent_create" });
+      return reply.status(400).send(validationErrorPayload(parsed.error, "invalid_agent_create"));
     }
     const body = parsed.data;
 

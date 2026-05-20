@@ -165,6 +165,12 @@ The Go SDK is intended for Go services that run real executor workers in their
 own repository. It wraps registry sync, heartbeat/progress, poll, and final
 execution reporting.
 
+Production consumers should pin the tagged nested module:
+
+```go
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.2.0
+```
+
 ```go
 package main
 
@@ -202,8 +208,8 @@ func main() {
 }
 ```
 
-For local source integration before a tagged release, consumers can use a Go
-module replace:
+For local source integration when testing unreleased changes, consumers can use
+a temporary Go module replace:
 
 ```go
 require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.0.0
