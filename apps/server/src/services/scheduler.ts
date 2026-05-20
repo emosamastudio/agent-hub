@@ -7,6 +7,18 @@ import { serverConfig } from "../config.js";
 import { getPool } from "../db/connection.js";
 import type pg from "pg";
 
+type SchedulerLogFields = Record<string, unknown>;
+export type SchedulerLogger = {
+  info: (fields: SchedulerLogFields, message?: string) => void;
+  warn: (fields: SchedulerLogFields, message?: string) => void;
+  error: (fields: SchedulerLogFields, message?: string) => void;
+};
+
+type SchedulerStepError = {
+  step: string;
+  message: string;
+};
+
 function broadcast(event: Record<string, unknown>) {
   const fn = (globalThis as any).__hubBroadcast;
   if (fn) fn(event);
@@ -24,29 +36,155 @@ let tickInProgress = false;
 const schedulerLockId = 438787;
 const warningThrottleMs = 60_000;
 const warningLastEmittedAt = new Map<string, number>();
+const consoleSchedulerLogger: SchedulerLogger = {
+  info(fields, message) {
+    console.log(JSON.stringify({ level: "info", msg: message, ...fields }));
+  },
+  warn(fields, message) {
+    console.warn(JSON.stringify({ level: "warn", msg: message, ...fields }));
+  },
+  error(fields, message) {
+    const { err, ...rest } = fields;
+    console.error(JSON.stringify({
+      level: "error",
+      msg: message,
+      ...rest,
+      error: serializeError(err),
+    }));
+  },
+};
+let schedulerLogger: SchedulerLogger = consoleSchedulerLogger;
+
+const schedulerRuntimeStats = {
+  running: false,
+  tickMs: serverConfig.schedulerTickMs,
+  startedAt: null as string | null,
+  stoppedAt: null as string | null,
+  tickInProgress: false,
+  tickCount: 0,
+  overlapSkippedCount: 0,
+  lockSkippedCount: 0,
+  lastTickStartedAt: null as string | null,
+  lastTickFinishedAt: null as string | null,
+  lastTickDurationMs: null as number | null,
+  lastTickErrorCount: 0,
+  lastTickStepErrors: [] as SchedulerStepError[],
+};
+
+function serializeError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  return { message: String(error) };
+}
 
 function warnThrottled(key: string, message: string) {
   const now = Date.now();
   const lastEmittedAt = warningLastEmittedAt.get(key) ?? 0;
   if (now - lastEmittedAt < warningThrottleMs) return;
   warningLastEmittedAt.set(key, now);
-  console.warn(message);
+  schedulerLogger.warn({
+    component: "scheduler",
+    event: "scheduler.warning",
+    key,
+  }, message);
 }
 
-export function startScheduler(ctx: SchedulerContext) {
+export function getSchedulerRuntimeStats() {
+  return {
+    running: schedulerRuntimeStats.running,
+    tick_ms: schedulerRuntimeStats.tickMs,
+    started_at: schedulerRuntimeStats.startedAt,
+    stopped_at: schedulerRuntimeStats.stoppedAt,
+    tick_in_progress: schedulerRuntimeStats.tickInProgress,
+    tick_count: schedulerRuntimeStats.tickCount,
+    overlap_skipped_count: schedulerRuntimeStats.overlapSkippedCount,
+    lock_skipped_count: schedulerRuntimeStats.lockSkippedCount,
+    last_tick_started_at: schedulerRuntimeStats.lastTickStartedAt,
+    last_tick_finished_at: schedulerRuntimeStats.lastTickFinishedAt,
+    last_tick_duration_ms: schedulerRuntimeStats.lastTickDurationMs,
+    last_tick_error_count: schedulerRuntimeStats.lastTickErrorCount,
+    last_tick_step_errors: schedulerRuntimeStats.lastTickStepErrors,
+  };
+}
+
+export function startScheduler(
+  ctx: SchedulerContext,
+  options: { logger?: SchedulerLogger } = {},
+) {
+  schedulerLogger = options.logger ?? schedulerLogger;
   tickTimer = setInterval(() => tick(ctx), serverConfig.schedulerTickMs);
-  console.log(`Scheduler started, tick every ${serverConfig.schedulerTickMs}ms`);
+  schedulerRuntimeStats.running = true;
+  schedulerRuntimeStats.tickMs = serverConfig.schedulerTickMs;
+  schedulerRuntimeStats.startedAt = new Date().toISOString();
+  schedulerRuntimeStats.stoppedAt = null;
+  schedulerLogger.info({
+    component: "scheduler",
+    event: "scheduler.started",
+    tickMs: serverConfig.schedulerTickMs,
+  }, "Scheduler started");
 }
 
 export function stopScheduler() {
-  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+  schedulerRuntimeStats.running = false;
+  schedulerRuntimeStats.stoppedAt = new Date().toISOString();
+  schedulerRuntimeStats.tickInProgress = false;
+  schedulerLogger.info({
+    component: "scheduler",
+    event: "scheduler.stopped",
+  }, "Scheduler stopped");
+  schedulerLogger = consoleSchedulerLogger;
 }
 
 async function tick(ctx: SchedulerContext) {
-  if (tickInProgress) return;
+  if (tickInProgress) {
+    schedulerRuntimeStats.overlapSkippedCount++;
+    schedulerLogger.warn({
+      component: "scheduler",
+      event: "scheduler.tick.skipped",
+      reason: "tick_in_progress",
+    }, "Scheduler tick skipped because a previous tick is still running");
+    return;
+  }
   tickInProgress = true;
+  schedulerRuntimeStats.tickInProgress = true;
+  schedulerRuntimeStats.tickCount++;
+  schedulerRuntimeStats.lastTickStartedAt = new Date().toISOString();
+  schedulerRuntimeStats.lastTickFinishedAt = null;
+  schedulerRuntimeStats.lastTickDurationMs = null;
+  const tickStartedAt = Date.now();
+  let stepErrorCount = 0;
+  const stepErrors: SchedulerStepError[] = [];
   let client: pg.PoolClient | null = null;
   let lockAcquired = false;
+
+  async function runStep(step: string, operation: () => Promise<void>) {
+    const stepStartedAt = Date.now();
+    try {
+      await operation();
+    } catch (err) {
+      stepErrorCount++;
+      stepErrors.push({
+        step,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      schedulerLogger.error({
+        component: "scheduler",
+        event: "scheduler.step.failed",
+        step,
+        durationMs: Date.now() - stepStartedAt,
+        err,
+      }, `${step} failed`);
+    }
+  }
 
   try {
     client = await getPool().connect();
@@ -55,25 +193,53 @@ async function tick(ctx: SchedulerContext) {
       [schedulerLockId],
     );
     lockAcquired = lockResult.rows[0]?.acquired === true;
-    if (!lockAcquired) return;
+    if (!lockAcquired) {
+      schedulerRuntimeStats.lockSkippedCount++;
+      return;
+    }
 
-    try { await cronEvaluator(ctx); } catch (e) { console.error("CronEvaluator failed:", e); }
-    try { await heartbeatMonitor(ctx); } catch (e) { console.error("HeartbeatMonitor failed:", e); }
-    try { await timeoutChecker(ctx); } catch (e) { console.error("TimeoutChecker failed:", e); }
-    try { await retryManager(ctx); } catch (e) { console.error("RetryManager failed:", e); }
-    try { await alertEvaluator(ctx); } catch (e) { console.error("AlertEvaluator failed:", e); }
-    try { await retentionCleanup(ctx); } catch (e) { console.error("RetentionCleanup failed:", e); }
-    try { await matcher(ctx); } catch (e) { console.error("Matcher failed:", e); }
+    await runStep("cronEvaluator", () => cronEvaluator(ctx));
+    await runStep("heartbeatMonitor", () => heartbeatMonitor(ctx));
+    await runStep("timeoutChecker", () => timeoutChecker(ctx));
+    await runStep("retryManager", () => retryManager(ctx));
+    await runStep("alertEvaluator", () => alertEvaluator(ctx));
+    await runStep("retentionCleanup", () => retentionCleanup(ctx));
+    await runStep("matcher", () => matcher(ctx));
+  } catch (err) {
+    stepErrorCount++;
+    stepErrors.push({
+      step: "schedulerTick",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    schedulerLogger.error({
+      component: "scheduler",
+      event: "scheduler.tick.failed",
+      err,
+    }, "Scheduler tick failed");
   } finally {
     if (lockAcquired && client) {
       try {
         await client.query("SELECT pg_advisory_unlock($1)", [schedulerLockId]);
-      } catch (e) {
-        console.error("Scheduler advisory unlock failed:", e);
+      } catch (err) {
+        stepErrorCount++;
+        stepErrors.push({
+          step: "advisoryUnlock",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        schedulerLogger.error({
+          component: "scheduler",
+          event: "scheduler.advisory_unlock.failed",
+          err,
+        }, "Scheduler advisory unlock failed");
       }
     }
     client?.release();
     tickInProgress = false;
+    schedulerRuntimeStats.tickInProgress = false;
+    schedulerRuntimeStats.lastTickFinishedAt = new Date().toISOString();
+    schedulerRuntimeStats.lastTickDurationMs = Date.now() - tickStartedAt;
+    schedulerRuntimeStats.lastTickErrorCount = stepErrorCount;
+    schedulerRuntimeStats.lastTickStepErrors = stepErrors;
   }
 }
 

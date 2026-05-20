@@ -205,6 +205,7 @@ interface AgentCreateFormValues {
   projectId: string;
   name: string;
   displayName: string;
+  description: string;
   agentType: "cron_task" | "llm_agent";
   cronExpression: string;
   handlerName: string;
@@ -427,6 +428,7 @@ function initialAgentCreateForm(projectId = ""): AgentCreateFormValues {
     projectId,
     name: "",
     displayName: "",
+    description: "",
     agentType: "cron_task",
     cronExpression: "",
     handlerName: "",
@@ -1430,6 +1432,18 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
+          <span>Description</span>
+          <textarea
+            className="control-input"
+            value={values.description}
+            onChange={(event) => onChange({ description: event.currentTarget.value })}
+            placeholder="Runs the daily digest workflow and reports delivery status."
+            rows={3}
+            required
+          />
+        </label>
+
+        <label className="control-field control-field--wide">
           <span>Cron</span>
           <input
             className="control-input"
@@ -2262,13 +2276,14 @@ export default function App() {
     const selectedProjectId = createAgentForm.projectId || projects[0]?.id;
     const name = createAgentForm.name.trim();
     const displayName = createAgentForm.displayName.trim();
+    const description = createAgentForm.description.trim();
 
     if (!selectedProjectId) {
       setCreateAgentError("No active project is available.");
       return;
     }
-    if (!name || !displayName) {
-      setCreateAgentError("Agent name and display name are required.");
+    if (!name || !displayName || !description) {
+      setCreateAgentError("Agent name, display name, and description are required.");
       return;
     }
 
@@ -2279,6 +2294,7 @@ export default function App() {
         projectId: selectedProjectId,
         name,
         displayName,
+        description,
         agentType: createAgentForm.agentType,
         cronExpression: createAgentForm.cronExpression.trim() || null,
         handlerName: createAgentForm.handlerName.trim() || null,

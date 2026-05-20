@@ -10,6 +10,7 @@ export interface AgentHubConfig {
 export interface AgentSpec {
   name: string;
   displayName: string;
+  description: string;
   agentType: 'cron_task' | 'llm_agent';
   cron?: string;
   handler: string;
@@ -156,6 +157,39 @@ export interface AgentHubTriggerAndWaitResult {
   execution: unknown;
 }
 
+export interface AgentHubSchedulerRuntimeMetrics {
+  running: boolean;
+  tick_ms: number;
+  started_at: string | null;
+  stopped_at: string | null;
+  tick_in_progress: boolean;
+  tick_count: number;
+  overlap_skipped_count: number;
+  lock_skipped_count: number;
+  last_tick_started_at: string | null;
+  last_tick_finished_at: string | null;
+  last_tick_duration_ms: number | null;
+  last_tick_error_count: number;
+  last_tick_step_errors: Array<{ step: string; message: string }>;
+}
+
+export interface AgentHubMetricsSnapshot {
+  agents_total: number;
+  agents_enabled: number;
+  agents_disabled: number;
+  agents_online: number;
+  agents_offline: number;
+  executions_queued: number;
+  executions_running: number;
+  executions_success: number;
+  executions_failed: number;
+  executions_timeout: number;
+  executions_cancelled: number;
+  executions_terminal: number;
+  alerts_active: number;
+  scheduler: AgentHubSchedulerRuntimeMetrics;
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -171,6 +205,7 @@ export interface AgentHubCreateAgentInput {
   projectId?: string;
   name: string;
   displayName: string;
+  description: string;
   agentType?: AgentHubAgentType;
   cronExpression?: string | null;
   handlerName?: string | null;
@@ -248,6 +283,10 @@ export class AgentHubControlClient {
 
   async ready(): Promise<unknown> {
     return this.requestJson('GET', '/api/ready', undefined, 'none');
+  }
+
+  async getMetrics(): Promise<AgentHubMetricsSnapshot> {
+    return this.requestJson('GET', '/api/metrics', undefined, 'none');
   }
 
   async listProjects(): Promise<unknown[]> {

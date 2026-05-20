@@ -73,6 +73,8 @@ export async function startAgentHubServer(): Promise<RunningAgentHubServer> {
     executionRepo: ctx.executionRepo,
     traceRepo: ctx.traceRepo,
     alertRepo: ctx.alertRepo,
+  }, {
+    logger: app.log,
   });
 
   const shutdown = createShutdownHandler({

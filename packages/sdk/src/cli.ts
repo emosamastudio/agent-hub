@@ -31,6 +31,7 @@ type CliInvocation =
   | { command: "help" }
   | { command: "health" }
   | { command: "ready" }
+  | { command: "metrics" }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -99,6 +100,10 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
 
   if (root === "ready") {
     return { command: "ready" };
+  }
+
+  if (root === "metrics") {
+    return { command: "metrics" };
   }
 
   if (root === "projects") {
@@ -210,15 +215,17 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       };
     }
     if (subcommand === "create") {
-      if (!third) throw new Error("Usage: agent-hub agents create <agent-name> --display-name <name>");
+      if (!third) throw new Error("Usage: agent-hub agents create <agent-name> --display-name <name> --description <text>");
       const displayName = stringFlag(parsed.flags, "display-name");
-      if (!displayName) throw new Error("Usage: agent-hub agents create <agent-name> --display-name <name>");
+      const description = stringFlag(parsed.flags, "description");
+      if (!displayName || !description) throw new Error("Usage: agent-hub agents create <agent-name> --display-name <name> --description <text>");
       return {
         command: "agents:create",
         input: compactDefined({
           projectId: stringFlag(parsed.flags, "project-id"),
           name: third,
           displayName,
+          description,
           agentType: parseAgentType(stringFlag(parsed.flags, "type")),
           cronExpression: stringFlag(parsed.flags, "cron"),
           handlerName: stringFlag(parsed.flags, "handler"),
@@ -413,6 +420,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.health();
     case "ready":
       return client.ready();
+    case "metrics":
+      return client.getMetrics();
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -628,6 +637,7 @@ function helpText(): string {
   return `Usage:
   agent-hub health
   agent-hub ready
+  agent-hub metrics
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
@@ -638,7 +648,7 @@ function helpText(): string {
   agent-hub alerts acknowledge <alert-id> [--by <actor>]
   agent-hub agents list [--status online] [--type cron_task] [--archived active|include|only]
   agent-hub agents get <agent-id> [--include-archived]
-  agent-hub agents create <agent-name> --display-name <name> [--type cron_task] [--cron <expr>] [--handler <name>] [--disabled]
+  agent-hub agents create <agent-name> --display-name <name> --description <text> [--type cron_task] [--cron <expr>] [--handler <name>] [--disabled]
   agent-hub agents update <agent-id> [--display-name <name>] [--cron <expr>|--clear-cron] [--handler <name>|--clear-handler]
   agent-hub agents schedule-preview <agent-id> [--limit 5]
   agent-hub agents enable <agent-id>

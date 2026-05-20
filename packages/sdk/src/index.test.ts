@@ -49,6 +49,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -105,6 +106,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -127,6 +129,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -146,6 +149,7 @@ describe("AgentHubClient", () => {
       expect(JSON.parse(init?.body as string)).toEqual({
         name: "demo_agent",
         displayName: "Demo Agent",
+        description: "Runs the demo handler for SDK registry synchronization.",
         agentType: "cron_task",
         handler: "demo_handler",
         cron: "*/5 * * * *",
@@ -162,6 +166,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK registry synchronization.",
       agentType: "cron_task",
       handler: "demo_handler",
       cron: "*/5 * * * *",
@@ -205,6 +210,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -260,6 +266,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -329,6 +336,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -411,6 +419,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -472,6 +481,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -536,6 +546,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -600,6 +611,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -661,6 +673,7 @@ describe("AgentHubClient", () => {
     client.register({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       handler: "demo_handler",
     });
@@ -707,6 +720,44 @@ describe("AgentHubControlClient", () => {
       status: "ok",
       checks: { database: { status: "ok" } },
     });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  test("getMetrics reads the unauthenticated operational metrics endpoint", async () => {
+    const snapshot = {
+      agents_total: 3,
+      agents_enabled: 3,
+      agents_online: 2,
+      executions_queued: 1,
+      alerts_active: 0,
+      scheduler: {
+        running: true,
+        tick_count: 42,
+        last_tick_error_count: 0,
+      },
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(input.toString()).toBe("http://hub/api/metrics");
+      expect(init?.method).toBe("GET");
+      expect(init?.headers).toMatchObject({
+        "Agent-Hub-Version": "1",
+      });
+      expect(init?.headers).not.toMatchObject({
+        Authorization: expect.any(String),
+      });
+      expect(init?.body).toBeUndefined();
+      return jsonResponse(snapshot);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.getMetrics()).resolves.toEqual(snapshot);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -1132,6 +1183,7 @@ describe("AgentHubControlClient", () => {
       expect(JSON.parse(init?.body as string)).toEqual({
         name: "demo_agent",
         displayName: "Demo Agent",
+        description: "Runs the demo handler for SDK executor tests.",
         agentType: "cron_task",
         cronExpression: "*/15 * * * *",
         handlerName: "demo_handler",
@@ -1152,6 +1204,7 @@ describe("AgentHubControlClient", () => {
     await expect(client.createAgent({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
       agentType: "cron_task",
       cronExpression: "*/15 * * * *",
       handlerName: "demo_handler",

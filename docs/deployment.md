@@ -54,10 +54,61 @@ Verify:
 
 ```bash
 curl -fsS http://127.0.0.1:8788/api/ready
+curl -fsS http://127.0.0.1:8788/api/metrics
 node packages/sdk/dist/cli.js ready
+node packages/sdk/dist/cli.js metrics
 systemctl status agent-hub
 journalctl -u agent-hub -n 100 --no-pager
 ```
+
+## Observability And 24h Canary
+
+Agent Hub emits Fastify/Pino request logs and structured scheduler lifecycle logs to stdout/stderr. Under systemd, read them from journald:
+
+```bash
+journalctl -u agent-hub -f --output=cat
+```
+
+Scheduler logs include stable fields:
+
+- `component=scheduler`
+- `event=scheduler.started`
+- `event=scheduler.stopped`
+- `event=scheduler.warning`
+- `event=scheduler.tick.skipped`
+- `event=scheduler.step.failed`
+- `event=scheduler.tick.failed`
+- `event=scheduler.advisory_unlock.failed`
+
+The unauthenticated metrics snapshot is intended for local health checks and canary observation:
+
+```bash
+node packages/sdk/dist/cli.js metrics
+curl -fsS http://127.0.0.1:8788/api/metrics | jq
+```
+
+During the first 24 hours after deployment, check at least these fields every hour and after each OPH canary:
+
+- `scheduler.running` remains `true`.
+- `scheduler.tick_count` keeps increasing.
+- `scheduler.last_tick_error_count` remains `0`; if not, inspect `scheduler.last_tick_step_errors` and journald events.
+- `executions_queued` does not grow without matching executor activity.
+- `executions_failed` and `executions_timeout` do not increase unexpectedly.
+- `alerts_active` does not grow or stay unacknowledged after triage.
+- `agents_enabled`, `agents_online`, and `agents_offline` match the expected OPH executor rollout state.
+
+Useful operator loop:
+
+```bash
+node packages/sdk/dist/cli.js scheduler status
+node packages/sdk/dist/cli.js agents list
+node packages/sdk/dist/cli.js executors list
+node packages/sdk/dist/cli.js executions list --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --status running --limit 20
+node packages/sdk/dist/cli.js alerts list --limit 20
+```
+
+Treat any `scheduler.step.failed`, `scheduler.tick.failed`, growing queued backlog, or repeated timeout/failed executions as a canary failure until explained.
 
 ## OPH Project Setup
 
@@ -91,6 +142,7 @@ node packages/sdk/dist/cli.js projects rotate-key <oph-project-id>
 After OPH registers its executor agents:
 
 ```bash
+node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js scheduler status
 node packages/sdk/dist/cli.js agents list
 node packages/sdk/dist/cli.js trigger enrich_repo \

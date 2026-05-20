@@ -33,6 +33,7 @@ type Config struct {
 type AgentSpec struct {
 	Name            string            `json:"name"`
 	DisplayName     string            `json:"displayName"`
+	Description     string            `json:"description"`
 	AgentType       string            `json:"agentType"`
 	Cron            string            `json:"cron,omitempty"`
 	Handler         string            `json:"handler,omitempty"`
@@ -50,6 +51,7 @@ type AgentSpec struct {
 type RegisteredAgent struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	HandlerName string `json:"handlerName"`
 }
 
@@ -149,6 +151,9 @@ func (c *Client) SyncRegistry(ctx context.Context) ([]RegisteredAgent, error) {
 	c.registered = c.registered[:0]
 	registered := make([]RegisteredAgent, 0, len(c.agents))
 	for _, agent := range c.agents {
+		if strings.TrimSpace(agent.Description) == "" {
+			return nil, fmt.Errorf("agenthub: agent %s description is required", agent.Name)
+		}
 		resp, err := c.do(ctx, http.MethodPut, "/api/registry/agents", agent)
 		if err != nil {
 			return nil, err
@@ -375,6 +380,7 @@ func normalizeAgentSpec(spec AgentSpec) AgentSpec {
 	if spec.DisplayName == "" {
 		spec.DisplayName = spec.Name
 	}
+	spec.Description = strings.TrimSpace(spec.Description)
 	if spec.AgentType == "" {
 		spec.AgentType = AgentTypeCronTask
 	}

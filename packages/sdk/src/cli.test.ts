@@ -8,6 +8,12 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses metrics checks", () => {
+    expect(parseCliInvocation(["metrics"])).toEqual({
+      command: "metrics",
+    });
+  });
+
   test("parses trigger invocations with JSON payload and dedup options", () => {
     expect(parseCliInvocation([
       "trigger",
@@ -191,6 +197,8 @@ describe("agent-hub CLI", () => {
       "demo_agent",
       "--display-name",
       "Demo Agent",
+      "--description",
+      "Runs the demo handler for manual operator validation.",
       "--type",
       "llm_agent",
       "--cron",
@@ -213,6 +221,7 @@ describe("agent-hub CLI", () => {
       input: {
         name: "demo_agent",
         displayName: "Demo Agent",
+        description: "Runs the demo handler for manual operator validation.",
         agentType: "llm_agent",
         cronExpression: "*/10 * * * *",
         handlerName: "demo_handler",
@@ -224,6 +233,16 @@ describe("agent-hub CLI", () => {
         enabled: false,
       },
     });
+  });
+
+  test("requires a description when creating an agent", () => {
+    expect(() => parseCliInvocation([
+      "agents",
+      "create",
+      "demo_agent",
+      "--display-name",
+      "Demo Agent",
+    ])).toThrow("Usage: agent-hub agents create <agent-name> --display-name <name> --description <text>");
   });
 
   test("parses dashboard agent update invocations", () => {

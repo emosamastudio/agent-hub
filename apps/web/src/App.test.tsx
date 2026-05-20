@@ -237,6 +237,7 @@ describe("AgentCreatePanel", () => {
           projectId: "project-1",
           name: "daily_digest",
           displayName: "Daily Digest",
+          description: "Runs the daily digest workflow and reports delivery status.",
           agentType: "cron_task",
           cronExpression: "0 8 * * *",
           handlerName: "daily_digest",

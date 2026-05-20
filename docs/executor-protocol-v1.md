@@ -96,6 +96,7 @@ Request fields:
 {
   "name": "deep_research",
   "displayName": "Deep Research",
+  "description": "Runs OPH deep repository research jobs and reports structured research results.",
   "agentType": "llm_agent",
   "cron": "0 * * * *",
   "handler": "deep_research_handler",
@@ -120,11 +121,14 @@ Stable response fields:
   "projectId": "<project-id>",
   "name": "deep_research",
   "displayName": "Deep Research",
+  "description": "Runs OPH deep repository research jobs and reports structured research results.",
   "agentType": "llm_agent",
   "handlerName": "deep_research_handler",
   "timeoutSeconds": 600
 }
 ```
+
+`description` is required and must clearly explain the agent's responsibility. Agent Hub rejects empty or missing descriptions so the dashboard, CLI, MCP tools, and operators can identify every registered agent without reading consumer-project code.
 
 ### Heartbeat
 

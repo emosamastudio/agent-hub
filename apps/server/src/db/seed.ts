@@ -26,6 +26,7 @@ export async function seedIfEmpty(db: Db, options: SeedOptions = serverConfig) {
       projectId: proj.id,
       name: "demo_hello",
       displayName: "Demo Hello World",
+      description: "Demonstrates a basic scheduled Agent Hub task for local development.",
       agentType: "cron_task",
       cronExpression: "*/5 * * * *",
       handlerName: "demo_handler",

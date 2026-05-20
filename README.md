@@ -88,6 +88,7 @@ curl -X PUT http://127.0.0.1:8788/api/registry/agents \
   -d '{
     "name": "demo_agent",
     "displayName": "Demo Agent",
+    "description": "Runs a small demo task to validate Agent Hub scheduling and reporting.",
     "agentType": "cron_task",
     "handler": "demo_handler",
     "cron": "*/5 * * * *",
@@ -143,6 +144,7 @@ const hub = new AgentHubClient({
 hub.register({
   name: "demo_agent",
   displayName: "Demo Agent",
+  description: "Runs a small demo task to validate Agent Hub scheduling and reporting.",
   agentType: "cron_task",
   cron: "*/5 * * * *",
   handler: "demo_handler",
@@ -182,6 +184,7 @@ func main() {
 	client.Register(agenthub.AgentSpec{
 		Name:        "demo_go_worker",
 		DisplayName: "Demo Go Worker",
+		Description: "Runs a Go demo worker to validate registry sync, polling, progress, and reporting.",
 		AgentType:   agenthub.AgentTypeCronTask,
 		Handler:     "demo_go_handler",
 	})
@@ -228,6 +231,7 @@ npm run build -w @agent-hub/sdk
 
 node packages/sdk/dist/cli.js health
 node packages/sdk/dist/cli.js ready
+node packages/sdk/dist/cli.js metrics
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -243,6 +247,7 @@ node packages/sdk/dist/cli.js agents list --archived only
 node packages/sdk/dist/cli.js agents get <agent-id> --include-archived
 node packages/sdk/dist/cli.js agents create demo_agent \
   --display-name "Demo Agent" \
+  --description "Runs a manually managed demo task for Agent Hub validation" \
   --type cron_task \
   --cron "*/5 * * * *" \
   --handler demo_handler \
@@ -289,6 +294,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 
 `projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
 
+Agent creation and SDK registry sync require a clear `description`; treat it as part of the public operator contract for each agent.
+
 CLI connection defaults match local dev:
 
 - `AGENT_HUB_URL` or `--url`, default `http://127.0.0.1:8788`
@@ -309,6 +316,7 @@ Exposed tools:
 
 - `agent_hub_health`
 - `agent_hub_ready`
+- `agent_hub_get_metrics`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

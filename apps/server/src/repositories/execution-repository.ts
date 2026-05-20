@@ -92,6 +92,26 @@ export class ExecutionRepository {
     return (result.rows[0] as any)?.cnt ?? 0;
   }
 
+  async countByStatus() {
+    const result = await this.db.execute(sql`
+      SELECT status, COUNT(*)::int AS count
+      FROM executions
+      GROUP BY status
+    `);
+    const counts: Record<string, number> = {
+      queued: 0,
+      running: 0,
+      success: 0,
+      failed: 0,
+      timeout: 0,
+      cancelled: 0,
+    };
+    for (const row of result.rows as Array<{ status: string; count: number }>) {
+      counts[row.status] = Number(row.count ?? 0);
+    }
+    return counts;
+  }
+
   async claimForDispatch(executionId: string) {
     const result = await this.db.execute(sql`
       WITH target AS (

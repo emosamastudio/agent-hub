@@ -8,6 +8,7 @@ describe("Agent Hub MCP tools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "agent_hub_health",
       "agent_hub_ready",
+      "agent_hub_get_metrics",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -54,6 +55,41 @@ describe("Agent Hub MCP tools", () => {
       ],
     });
     expect(ready).toHaveBeenCalledWith();
+  });
+
+  test("metrics tool reads the operational canary snapshot", async () => {
+    const getMetrics = vi.fn(async () => ({
+      agents_total: 3,
+      agents_online: 2,
+      executions_queued: 1,
+      alerts_active: 0,
+      scheduler: {
+        running: true,
+        tick_count: 42,
+        last_tick_error_count: 0,
+      },
+    }));
+    const tools = createAgentHubMcpTools({ getMetrics } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_get_metrics")?.handler({})).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            agents_total: 3,
+            agents_online: 2,
+            executions_queued: 1,
+            alerts_active: 0,
+            scheduler: {
+              running: true,
+              tick_count: 42,
+              last_tick_error_count: 0,
+            },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(getMetrics).toHaveBeenCalledWith();
   });
 
   test("project list tool reads sanitized project records", async () => {
@@ -381,6 +417,7 @@ describe("Agent Hub MCP tools", () => {
     await expect(tools.find((tool) => tool.name === "agent_hub_create_agent")?.handler({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for MCP-driven agent creation.",
       agentType: "cron_task",
       cronExpression: "*/15 * * * *",
       handlerName: "demo_handler",
@@ -413,6 +450,7 @@ describe("Agent Hub MCP tools", () => {
     expect(createAgent).toHaveBeenCalledWith({
       name: "demo_agent",
       displayName: "Demo Agent",
+      description: "Runs the demo handler for MCP-driven agent creation.",
       agentType: "cron_task",
       cronExpression: "*/15 * * * *",
       handlerName: "demo_handler",

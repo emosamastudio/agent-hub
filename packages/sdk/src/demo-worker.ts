@@ -12,6 +12,7 @@ type Env = Record<string, string | undefined>;
 export const demoWorkerAgentSpec: AgentSpec = {
   name: "demo_node_worker",
   displayName: "Demo Node Worker",
+  description: "Demonstrates Node executor registration, polling, progress, tracing, and reporting.",
   agentType: "cron_task",
   cron: "*/15 * * * *",
   handler: "demo_node_worker_handler",

@@ -43,6 +43,12 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       handler: async () => toMcpText(await client.ready()),
     },
     {
+      name: "agent_hub_get_metrics",
+      description: "Read Agent Hub operational counters and scheduler runtime metrics for canary observation.",
+      inputSchema: {},
+      handler: async () => toMcpText(await client.getMetrics()),
+    },
+    {
       name: "agent_hub_list_projects",
       description: "List Agent Hub projects without exposing API key hashes or plaintext keys.",
       inputSchema: {},
@@ -167,6 +173,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         projectId: z.string().optional(),
         name: z.string().min(1),
         displayName: z.string().min(1),
+        description: z.string().min(10),
         agentType: z.enum(["cron_task", "llm_agent"]).optional(),
         cronExpression: z.string().nullable().optional(),
         handlerName: z.string().nullable().optional(),
@@ -188,6 +195,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         projectId: stringArg(args.projectId),
         name: args.name as string,
         displayName: args.displayName as string,
+        description: args.description as string,
         agentType: agentTypeArg(args.agentType),
         cronExpression: nullableStringArg(args.cronExpression),
         handlerName: nullableStringArg(args.handlerName),

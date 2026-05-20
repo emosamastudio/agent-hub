@@ -72,18 +72,19 @@ async function api(
   body?: unknown,
   auth: "basic" | "bearer" | "none" = "basic",
 ) {
+  const requestBody = defaultAgentDescription(method, url, body);
   const headers: Record<string, string> = {
   };
   if (auth === "basic") headers.Authorization = authHeader();
   if (auth === "bearer") headers.Authorization = apiKeyHeader();
-  if (body !== undefined) {
+  if (requestBody !== undefined) {
     headers["Content-Type"] = "application/json";
   }
   const res = await app.inject({
     method,
     url,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: requestBody !== undefined ? JSON.stringify(requestBody) : undefined,
   });
   return {
     status: res.statusCode,
@@ -92,22 +93,43 @@ async function api(
 }
 
 async function apiWithBearer(method: string, url: string, apiKey: string, body?: unknown) {
+  const requestBody = defaultAgentDescription(method, url, body);
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
   };
-  if (body !== undefined) {
+  if (requestBody !== undefined) {
     headers["Content-Type"] = "application/json";
   }
   const res = await app.inject({
     method,
     url,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: requestBody !== undefined ? JSON.stringify(requestBody) : undefined,
   });
   return {
     status: res.statusCode,
     body: res.body ? JSON.parse(res.body) : null,
   };
+}
+
+function defaultAgentDescription(method: string, url: string, body: unknown) {
+  if (
+    ((method === "PUT" && url === "/api/registry/agents")
+      || (method === "POST" && url === "/api/agents"))
+    && body
+    && typeof body === "object"
+    && !Array.isArray(body)
+    && !("description" in body)
+  ) {
+    const name = typeof (body as { name?: unknown }).name === "string"
+      ? (body as { name: string }).name
+      : "agent";
+    return {
+      ...body as Record<string, unknown>,
+      description: `Test registration description for ${name}.`,
+    };
+  }
+  return body;
 }
 
 // ─── Tests ───
@@ -127,10 +149,44 @@ test("GET /api/ready returns database readiness without dashboard auth", async (
   assert.strictEqual(body.checks.database.status, "ok");
 });
 
-test("GET /api/metrics returns agent counts", async () => {
+test("GET /api/metrics returns operational counters for canary observation", async () => {
+  const agentName = scopedName("metrics");
+  const registered = await api("PUT", "/api/registry/agents", {
+    name: agentName,
+    displayName: "Metrics Agent",
+    agentType: "cron_task",
+    handler: "metrics_handler",
+  }, "bearer");
+  assert.strictEqual(registered.status, 200);
+
+  const trigger = await api("POST", `/api/agents/${agentName}/trigger`, {
+    payload: { source: "metrics-test" },
+  }, "bearer");
+  assert.strictEqual(trigger.status, 202);
+
+  await ctx.alertRepo.createOnce({
+    ruleName: `metrics_probe_${testRunId}`,
+    severity: "warning",
+    agentId: registered.body.id,
+    message: `${agentName} metrics probe`,
+    context: { agentName },
+  }, 0);
+
   const { status, body } = await api("GET", "/api/metrics");
   assert.strictEqual(status, 200);
   assert.ok(body.agents_total >= 0);
+  assert.ok(body.agents_enabled >= 1);
+  assert.ok(body.agents_online >= 0);
+  assert.ok(body.executions_queued >= 1);
+  assert.ok(body.executions_running >= 0);
+  assert.ok(body.executions_success >= 0);
+  assert.ok(body.executions_failed >= 0);
+  assert.ok(body.executions_timeout >= 0);
+  assert.ok(body.executions_cancelled >= 0);
+  assert.ok(body.alerts_active >= 1);
+  assert.strictEqual(typeof body.scheduler.running, "boolean");
+  assert.strictEqual(typeof body.scheduler.tick_count, "number");
+  assert.ok("last_tick_error_count" in body.scheduler);
 });
 
 test("GET /api/scheduler/status explains queue, capacity, and cron state for an agent", async () => {
@@ -309,6 +365,7 @@ test("PUT /api/registry/agents registers new agent", async () => {
   const agent = {
     name: testAgentName,
     displayName: "Test Agent",
+    description: "Runs a deterministic test handler for registry coverage.",
     agentType: "cron_task",
     cron: "0 0 * * *",
     handler: "test_handler",
@@ -316,16 +373,32 @@ test("PUT /api/registry/agents registers new agent", async () => {
   const { status, body } = await api("PUT", "/api/registry/agents", agent, "bearer");
   assert.strictEqual(status, 200);
   assert.strictEqual(body.name, testAgentName);
+  assert.strictEqual(body.description, agent.description);
   assert.strictEqual(body.agentType, "cron_task");
+});
+
+test("PUT /api/registry/agents rejects agents without a clear description", async () => {
+  const { status, body } = await api("PUT", "/api/registry/agents", {
+    name: scopedName("missing_description"),
+    displayName: "Missing Description",
+    description: "",
+    agentType: "cron_task",
+    handler: "missing_description_handler",
+  }, "bearer");
+
+  assert.strictEqual(status, 400);
+  assert.strictEqual(body.error, "invalid_agent_spec");
 });
 
 test("POST /api/agents creates a dashboard-managed agent", async () => {
   const projects = await api("GET", "/api/projects");
+  const description = "Runs the dashboard-managed test handler for manual schedule validation.";
   const name = scopedName("dashboard_agent");
   const { status, body } = await api("POST", "/api/agents", {
     projectId: projects.body[0].id,
     name,
     displayName: "Dashboard Agent",
+    description,
     agentType: "cron_task",
     cronExpression: "*/15 * * * *",
     handlerName: "dashboard_handler",
@@ -339,6 +412,7 @@ test("POST /api/agents creates a dashboard-managed agent", async () => {
   assert.strictEqual(body.name, name);
   assert.strictEqual(body.projectId, projects.body[0].id);
   assert.strictEqual(body.displayName, "Dashboard Agent");
+  assert.strictEqual(body.description, description);
   assert.strictEqual(body.cronExpression, "*/15 * * * *");
   assert.strictEqual(body.handlerName, "dashboard_handler");
   assert.strictEqual(body.concurrency, 2);

@@ -7,6 +7,7 @@ import { serverConfig } from "../config.js";
 import { Cron } from "croner";
 import { getBearerToken, isValidDashboardBasicAuth } from "../middleware/auth.js";
 import { hashApiKey } from "../security.js";
+import { getSchedulerRuntimeStats } from "../services/scheduler.js";
 
 interface ExtendedAppContext extends AppContext {}
 
@@ -130,6 +131,7 @@ function healthErrorPayload(error: unknown) {
 const agentSpecSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
+  description: z.string().trim().min(10).max(1000),
   agentType: z.enum(["cron_task", "llm_agent"]),
   cron: z.string().optional(),
   handler: z.string().optional(),
@@ -173,6 +175,7 @@ const dashboardAgentCreateSchema = z.object({
   projectId: z.string().uuid().optional(),
   name: z.string().min(1),
   displayName: z.string().min(1),
+  description: z.string().trim().min(10).max(1000),
   agentType: z.enum(["cron_task", "llm_agent"]).default("cron_task"),
   cronExpression: z.string().min(1).nullable().optional(),
   handlerName: z.string().min(1).nullable().optional(),
@@ -352,10 +355,31 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
   // ── Metrics ──
   app.get("/api/metrics", async () => {
-    const agents = await ctx.agentRepo.findAll({ enabled: true });
+    const [agents, executionCounts, alertsActive] = await Promise.all([
+      ctx.agentRepo.findAll({}),
+      ctx.executionRepo.countByStatus(),
+      ctx.alertRepo.countActive(),
+    ]);
+    const agentsOnline = agents.filter(a => a.executorStatus === "online").length;
+    const agentsEnabled = agents.filter(a => a.enabled).length;
     return {
       agents_total: agents.length,
-      agents_online: agents.filter(a => a.executorStatus === "online").length,
+      agents_enabled: agentsEnabled,
+      agents_disabled: agents.length - agentsEnabled,
+      agents_online: agentsOnline,
+      agents_offline: agents.length - agentsOnline,
+      executions_queued: executionCounts.queued ?? 0,
+      executions_running: executionCounts.running ?? 0,
+      executions_success: executionCounts.success ?? 0,
+      executions_failed: executionCounts.failed ?? 0,
+      executions_timeout: executionCounts.timeout ?? 0,
+      executions_cancelled: executionCounts.cancelled ?? 0,
+      executions_terminal: (executionCounts.success ?? 0)
+        + (executionCounts.failed ?? 0)
+        + (executionCounts.timeout ?? 0)
+        + (executionCounts.cancelled ?? 0),
+      alerts_active: alertsActive,
+      scheduler: getSchedulerRuntimeStats(),
     };
   });
 
@@ -425,7 +449,11 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   app.put("/api/registry/agents", async (request, reply) => {
     const project = await requireProjectFromApiKey(request, reply);
     if (!project) return;
-    const body = agentSpecSchema.parse(request.body);
+    const parsed = agentSpecSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "invalid_agent_spec" });
+    }
+    const body = parsed.data;
     if (body.cron) {
       try { new Cron(body.cron); } catch {
         return reply.status(400).send({ error: "invalid_cron_expression" });
@@ -433,6 +461,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     }
     const agent = await ctx.agentRepo.upsert(project.id, body.name, {
       displayName: body.displayName,
+      description: body.description,
       agentType: body.agentType,
       cronExpression: body.cron ?? null,
       handlerName: body.handler ?? null,
@@ -810,6 +839,7 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     const existing = await ctx.agentRepo.findByProjectAndName(project.id, body.name);
     const agent = await ctx.agentRepo.upsert(project.id, body.name, {
       displayName: body.displayName,
+      description: body.description,
       agentType: body.agentType,
       cronExpression: body.cronExpression ?? null,
       handlerName: body.handlerName ?? null,

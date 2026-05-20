@@ -58,7 +58,11 @@ func TestClientRunRegistersPollsAndReports(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{ServerURL: server.URL, Project: "oph", APIKey: "token"})
-	client.Register(AgentSpec{Name: "deep_research", Handler: "deep_research_handler"})
+	client.Register(AgentSpec{
+		Name:        "deep_research",
+		Description: "Runs the deep research OPH handler against queued repository research jobs.",
+		Handler:     "deep_research_handler",
+	})
 
 	mux := NewServeMux()
 	mux.HandleFunc("deep_research_handler", func(ctx *Context, job *Job) error {
@@ -102,6 +106,9 @@ func TestClientRunRegistersPollsAndReports(t *testing.T) {
 	if registered.DisplayName != "deep_research" {
 		t.Fatalf("registered display name = %q", registered.DisplayName)
 	}
+	if registered.Description != "Runs the deep research OPH handler against queued repository research jobs." {
+		t.Fatalf("registered description = %q", registered.Description)
+	}
 	if registered.AgentType != AgentTypeCronTask {
 		t.Fatalf("registered agent type = %q", registered.AgentType)
 	}
@@ -135,7 +142,7 @@ func TestHeartbeatSendsRegisteredAgentsProgressAndCancellationSignals(t *testing
 	defer server.Close()
 
 	client := NewClient(Config{ServerURL: server.URL, APIKey: "token"})
-	client.Register(AgentSpec{Name: "deep_research", Handler: "deep_research_handler"})
+	client.Register(testAgentSpec("deep_research", "deep_research_handler"))
 
 	if _, err := client.SyncRegistry(context.Background()); err != nil {
 		t.Fatalf("SyncRegistry: %v", err)
@@ -189,8 +196,8 @@ func TestPollSendsAllRegisteredAgentNames(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{ServerURL: server.URL})
-	client.Register(AgentSpec{Name: "deep_research", Handler: "deep_research_handler"})
-	client.Register(AgentSpec{Name: "relationship_agent", Handler: "relationship_handler"})
+	client.Register(testAgentSpec("deep_research", "deep_research_handler"))
+	client.Register(testAgentSpec("relationship_agent", "relationship_handler"))
 
 	if _, err := client.SyncRegistry(context.Background()); err != nil {
 		t.Fatalf("SyncRegistry: %v", err)
@@ -202,6 +209,16 @@ func TestPollSendsAllRegisteredAgentNames(t *testing.T) {
 
 	if got := <-pollSeen; got != "deep_research,relationship_agent" {
 		t.Fatalf("poll agent_names = %q", got)
+	}
+}
+
+func TestSyncRegistryRequiresAgentDescription(t *testing.T) {
+	client := NewClient(Config{ServerURL: "http://agent-hub.invalid"})
+	client.Register(AgentSpec{Name: "deep_research", Handler: "deep_research_handler"})
+
+	_, err := client.SyncRegistry(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "description is required") {
+		t.Fatalf("SyncRegistry error = %v", err)
 	}
 }
 
@@ -235,7 +252,7 @@ func TestRunReportsMissingHandlerAsFailedExecution(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{ServerURL: server.URL})
-	client.Register(AgentSpec{Name: "deep_research", Handler: "missing_handler"})
+	client.Register(testAgentSpec("deep_research", "missing_handler"))
 	mux := NewServeMux()
 	mux.HandleFunc("other_handler", func(ctx *Context, job *Job) error { return nil })
 
@@ -259,4 +276,12 @@ func TestRunReportsMissingHandlerAsFailedExecution(t *testing.T) {
 	}
 	cancel()
 	<-errCh
+}
+
+func testAgentSpec(name string, handler string) AgentSpec {
+	return AgentSpec{
+		Name:        name,
+		Description: "Runs the " + name + " handler for Agent Hub Go SDK integration tests.",
+		Handler:     handler,
+	}
 }

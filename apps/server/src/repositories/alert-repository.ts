@@ -92,6 +92,15 @@ export class AlertRepository {
     return rows[0] ?? null;
   }
 
+  async countActive() {
+    const result = await this.db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM alert_log
+      WHERE acknowledged_at IS NULL
+    `);
+    return Number((result.rows[0] as any)?.count ?? 0);
+  }
+
   async expireOld(retentionDays: number) {
     await this.db.execute(sql`
       DELETE FROM alert_log
