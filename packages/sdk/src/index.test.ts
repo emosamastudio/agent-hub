@@ -989,6 +989,69 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("drainProject resolves a project name and drains it by id", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input.toString();
+      requests.push({ url, init });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (url === "http://hub/api/projects/project-1/drain") {
+        return jsonResponse({
+          ok: true,
+          project_id: "project-1",
+          agents_drained: 3,
+          cancelled_queued: 2,
+          cancelled_running: 1,
+          active_execution_count: 0,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+    });
+
+    await expect(client.drainProject("oph", { cancelRunning: true })).resolves.toMatchObject({
+      ok: true,
+      project_id: "project-1",
+      agents_drained: 3,
+      cancelled_queued: 2,
+      cancelled_running: 1,
+      active_execution_count: 0,
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/projects/project-1/drain",
+    ]);
+    expect(JSON.parse(requests[1].init?.body as string)).toEqual({ cancel_running: true });
+  });
+
+  test("drainProject reports missing projects before sending drain requests", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/projects") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+    });
+
+    await expect(client.drainProject("oph")).rejects.toThrow("Agent Hub project oph not found");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test("ensureProject creates a missing project and returns the one-time API key", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

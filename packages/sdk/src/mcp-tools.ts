@@ -8,6 +8,7 @@ import {
   type AgentHubDedupPolicy,
   type AgentHubDoctorOptions,
   type AgentHubDrainAgentOptions,
+  type AgentHubDrainProjectOptions,
   type AgentHubListAgentsQuery,
   type AgentHubListAlertsQuery,
   type AgentHubListExecutionsQuery,
@@ -104,6 +105,17 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         projectId: z.string().min(1),
       },
       handler: async (args) => toMcpText(await client.rotateProjectApiKey(args.projectId as string)),
+    },
+    {
+      name: "agent_hub_drain_project",
+      description: "Disable every agent in a project and cancel queued executions; optionally cancel running executions too.",
+      inputSchema: {
+        project: z.string().min(1),
+        cancelRunning: z.boolean().optional(),
+      },
+      handler: async (args) => toMcpText(await client.drainProject(args.project as string, compactDefined({
+        cancelRunning: booleanArg(args.cancelRunning),
+      }) as AgentHubDrainProjectOptions)),
     },
     {
       name: "agent_hub_get_scheduler_status",

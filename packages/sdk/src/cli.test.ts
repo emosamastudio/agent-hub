@@ -27,6 +27,23 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses project drain invocations", () => {
+    expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
+      command: "projects:drain",
+      project: "oph",
+      options: {
+        cancelRunning: false,
+      },
+    });
+    expect(parseCliInvocation(["projects", "drain", "project-1", "--cancel-running"])).toEqual({
+      command: "projects:drain",
+      project: "project-1",
+      options: {
+        cancelRunning: true,
+      },
+    });
+  });
+
   test("parses trigger invocations with JSON payload and dedup options", () => {
     expect(parseCliInvocation([
       "trigger",

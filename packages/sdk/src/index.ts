@@ -146,6 +146,10 @@ export interface AgentHubDrainAgentOptions {
   cancelRunning?: boolean;
 }
 
+export interface AgentHubDrainProjectOptions {
+  cancelRunning?: boolean;
+}
+
 export interface AgentHubWaitExecutionOptions {
   timeoutMs?: number;
   intervalMs?: number;
@@ -231,6 +235,15 @@ export interface AgentHubDoctorReport {
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
+  cancelled_queued: number;
+  cancelled_running: number;
+  active_execution_count: number;
+}
+
+export interface AgentHubDrainProjectResult {
+  ok: true;
+  project_id: string;
+  agents_drained: number;
   cancelled_queued: number;
   cancelled_running: number;
   active_execution_count: number;
@@ -492,6 +505,20 @@ export class AgentHubControlClient {
       undefined,
       'dashboard',
     );
+  }
+
+  async drainProject(
+    project: string,
+    options: AgentHubDrainProjectOptions = {},
+  ): Promise<AgentHubDrainProjectResult> {
+    const projects = await this.listProjects() as AgentHubProjectRecord[];
+    const targetProject = projects.find((candidate) => projectRecordMatches(candidate, project));
+    if (!targetProject) {
+      throw new Error(`Agent Hub project ${project} not found`);
+    }
+    return this.requestJson('POST', `/api/projects/${encodeURIComponent(targetProject.id)}/drain`, {
+      cancel_running: options.cancelRunning === true,
+    }, 'dashboard');
   }
 
   async listAgents(query: AgentHubListAgentsQuery = {}): Promise<unknown[]> {

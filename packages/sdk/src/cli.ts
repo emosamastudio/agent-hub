@@ -11,6 +11,7 @@ import {
   type AgentHubDedupPolicy,
   type AgentHubDoctorOptions,
   type AgentHubDrainAgentOptions,
+  type AgentHubDrainProjectOptions,
   type AgentHubGetAgentOptions,
   type AgentHubListAgentsQuery,
   type AgentHubListAlertsQuery,
@@ -38,6 +39,7 @@ type CliInvocation =
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
   | { command: "projects:rotate-key"; projectId: string }
+  | { command: "projects:drain"; project: string; options: AgentHubDrainProjectOptions }
   | { command: "scheduler:status"; query: AgentHubSchedulerStatusQuery }
   | { command: "executors:list"; query: AgentHubListExecutorsQuery }
   | { command: "alerts:list"; query: AgentHubListAlertsQuery }
@@ -150,6 +152,16 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       return {
         command: "projects:rotate-key",
         projectId: third,
+      };
+    }
+    if (subcommand === "drain") {
+      if (!third) throw new Error("Usage: agent-hub projects drain <project-name-or-id> [--cancel-running]");
+      return {
+        command: "projects:drain",
+        project: third,
+        options: {
+          cancelRunning: parsed.flags["cancel-running"] === true,
+        },
       };
     }
     throw new Error(`Unknown projects command: ${subcommand}`);
@@ -443,6 +455,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.createProject(invocation.input);
     case "projects:rotate-key":
       return client.rotateProjectApiKey(invocation.projectId);
+    case "projects:drain":
+      return client.drainProject(invocation.project, invocation.options);
     case "scheduler:status":
       return client.getSchedulerStatus(invocation.query);
     case "executors:list":
@@ -656,6 +670,7 @@ function helpText(): string {
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects rotate-key <project-id>
+  agent-hub projects drain <project-name-or-id> [--cancel-running]
   agent-hub scheduler status [--agent-id <id>] [--project <project-id>]
   agent-hub executors list [--project <project-id>]
   agent-hub alerts list [--limit 20] [--include-acknowledged]

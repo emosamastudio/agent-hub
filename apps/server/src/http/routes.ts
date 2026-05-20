@@ -290,6 +290,10 @@ const agentDrainSchema = z.object({
   cancel_running: z.boolean().default(false),
 }).strict();
 
+const projectDrainSchema = z.object({
+  cancel_running: z.boolean().default(false),
+}).strict();
+
 
 export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   // ── Health ──
@@ -840,6 +844,55 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     return {
       project: serializeProject(updated ?? project),
       api_key: apiKey,
+    };
+  });
+
+  app.post("/api/projects/:id/drain", async (request, reply) => {
+    const parsed = projectDrainSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "invalid_project_drain" });
+    }
+
+    const { id } = request.params as { id: string };
+    const project = await ctx.projectRepo.findById(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project_not_found" });
+    }
+
+    const projectAgents = await ctx.agentRepo.findAll({ projectId: id });
+    let cancelledQueued = 0;
+    let cancelledRunning = 0;
+    for (const agent of projectAgents) {
+      await ctx.agentRepo.update(agent.id, {
+        enabled: false,
+        executorStatus: "offline",
+        activeExecutionCount: parsed.data.cancel_running ? 0 : agent.activeExecutionCount,
+      } as any);
+      const cancelled = await ctx.executionRepo.cancelActiveForAgent(agent.id, {
+        cancelRunning: parsed.data.cancel_running,
+        errorMessage: "Cancelled by project drain",
+      });
+      cancelledQueued += cancelled.queued;
+      cancelledRunning += cancelled.running;
+      broadcast({ type: "agent.updated", agent_id: agent.id, enabled: false, executor_status: "offline" });
+    }
+
+    const refreshedAgents = await ctx.agentRepo.findAll({ projectId: id });
+    const activeExecutionCount = refreshedAgents.reduce(
+      (total, agent) => total + agent.activeExecutionCount,
+      0,
+    );
+    if (cancelledQueued > 0 || cancelledRunning > 0) {
+      broadcast({ type: "executions.cancelled", project_id: id, reason: "project_drain" });
+    }
+
+    return {
+      ok: true,
+      project_id: id,
+      agents_drained: projectAgents.length,
+      cancelled_queued: cancelledQueued,
+      cancelled_running: cancelledRunning,
+      active_execution_count: activeExecutionCount,
     };
   });
 

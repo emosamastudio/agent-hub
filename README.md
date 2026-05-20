@@ -253,6 +253,7 @@ node packages/sdk/dist/cli.js projects create oph \
   --display-name "Open Source Project Hunter" \
   --description "OPH executor integration"
 node packages/sdk/dist/cli.js projects rotate-key <project-id>
+node packages/sdk/dist/cli.js projects drain oph --cancel-running
 node packages/sdk/dist/cli.js scheduler status --agent-id <agent-id>
 node packages/sdk/dist/cli.js agents list --status online
 node packages/sdk/dist/cli.js agents list --archived only
@@ -308,6 +309,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 
 `projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
 
+`projects drain <name-or-id>` is the project-level stop switch for incidents and maintenance. It disables every active agent in the project, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided.
+
 Agent creation and SDK registry sync require a clear `description`; treat it as part of the public operator contract for each agent.
 
 CLI connection defaults match local dev:
@@ -336,6 +339,7 @@ Exposed tools:
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`
 - `agent_hub_rotate_project_api_key`
+- `agent_hub_drain_project`
 - `agent_hub_get_scheduler_status`
 - `agent_hub_list_executors`
 - `agent_hub_list_alerts`

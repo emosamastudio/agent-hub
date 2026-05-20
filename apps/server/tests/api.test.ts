@@ -934,6 +934,85 @@ test("POST /api/agents/:id/drain can cancel running executions when requested", 
   assert.strictEqual(fetchedExecution.body.errorMessage, "Cancelled by agent drain");
 });
 
+test("POST /api/projects/:id/drain disables all project agents and cancels queued and running executions", async () => {
+  const projectName = scopedName("drain_project");
+  const createdProject = await api("POST", "/api/projects", {
+    name: projectName,
+    displayName: "Drain Project",
+  });
+  assert.strictEqual(createdProject.status, 201);
+
+  const queuedAgentName = scopedName("drain_project_queued");
+  const runningAgentName = scopedName("drain_project_running");
+  const unrelatedAgentName = scopedName("drain_project_unrelated");
+
+  const queuedAgent = await apiWithBearer("PUT", "/api/registry/agents", createdProject.body.api_key, {
+    name: queuedAgentName,
+    displayName: "Drain Project Queued",
+    agentType: "cron_task",
+    handler: "drain_project_queued_handler",
+  });
+  const runningAgent = await apiWithBearer("PUT", "/api/registry/agents", createdProject.body.api_key, {
+    name: runningAgentName,
+    displayName: "Drain Project Running",
+    agentType: "cron_task",
+    handler: "drain_project_running_handler",
+  });
+  const unrelatedAgent = await api("PUT", "/api/registry/agents", {
+    name: unrelatedAgentName,
+    displayName: "Drain Project Unrelated",
+    agentType: "cron_task",
+    handler: "drain_project_unrelated_handler",
+  }, "bearer");
+  assert.strictEqual(queuedAgent.status, 200);
+  assert.strictEqual(runningAgent.status, 200);
+  assert.strictEqual(unrelatedAgent.status, 200);
+
+  const queuedTrigger = await apiWithBearer("POST", `/api/agents/${queuedAgentName}/trigger`, createdProject.body.api_key, {
+    payload: { source: "project-drain-queued" },
+  });
+  const runningTrigger = await apiWithBearer("POST", `/api/agents/${runningAgentName}/trigger`, createdProject.body.api_key, {
+    payload: { source: "project-drain-running" },
+  });
+  const unrelatedTrigger = await api("POST", `/api/agents/${unrelatedAgentName}/trigger`, {
+    payload: { source: "project-drain-unrelated" },
+  }, "bearer");
+  assert.strictEqual(queuedTrigger.status, 202);
+  assert.strictEqual(runningTrigger.status, 202);
+  assert.strictEqual(unrelatedTrigger.status, 202);
+
+  const claimed = await ctx.executionRepo.claimForDispatch(runningTrigger.body.execution_id);
+  assert.ok(claimed);
+
+  const drained = await api("POST", `/api/projects/${createdProject.body.project.id}/drain`, {
+    cancel_running: true,
+  });
+  assert.strictEqual(drained.status, 200);
+  assert.strictEqual(drained.body.ok, true);
+  assert.strictEqual(drained.body.project_id, createdProject.body.project.id);
+  assert.strictEqual(drained.body.agents_drained, 2);
+  assert.strictEqual(drained.body.cancelled_queued, 1);
+  assert.strictEqual(drained.body.cancelled_running, 1);
+  assert.strictEqual(drained.body.active_execution_count, 0);
+
+  const fetchedQueuedAgent = await api("GET", `/api/agents/${queuedAgent.body.id}`);
+  const fetchedRunningAgent = await api("GET", `/api/agents/${runningAgent.body.id}`);
+  const fetchedUnrelatedAgent = await api("GET", `/api/agents/${unrelatedAgent.body.id}`);
+  assert.strictEqual(fetchedQueuedAgent.body.enabled, false);
+  assert.strictEqual(fetchedRunningAgent.body.enabled, false);
+  assert.strictEqual(fetchedRunningAgent.body.activeExecutionCount, 0);
+  assert.strictEqual(fetchedUnrelatedAgent.body.enabled, true);
+
+  const fetchedQueuedExecution = await api("GET", `/api/executions/${queuedTrigger.body.execution_id}`);
+  const fetchedRunningExecution = await api("GET", `/api/executions/${runningTrigger.body.execution_id}`);
+  const fetchedUnrelatedExecution = await api("GET", `/api/executions/${unrelatedTrigger.body.execution_id}`);
+  assert.strictEqual(fetchedQueuedExecution.body.status, "cancelled");
+  assert.strictEqual(fetchedQueuedExecution.body.errorMessage, "Cancelled by project drain");
+  assert.strictEqual(fetchedRunningExecution.body.status, "cancelled");
+  assert.strictEqual(fetchedRunningExecution.body.errorMessage, "Cancelled by project drain");
+  assert.strictEqual(fetchedUnrelatedExecution.body.status, "queued");
+});
+
 test("executor poll only claims work for declared agents", async () => {
   const firstName = scopedName("poll_first");
   const secondName = scopedName("poll_second");

@@ -14,6 +14,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_ensure_project",
       "agent_hub_create_project",
       "agent_hub_rotate_project_api_key",
+      "agent_hub_drain_project",
       "agent_hub_get_scheduler_status",
       "agent_hub_list_executors",
       "agent_hub_list_alerts",
@@ -187,6 +188,38 @@ describe("Agent Hub MCP tools", () => {
       description: "OPH executor integration",
     });
     expect(rotateProjectApiKey).toHaveBeenCalledWith("project-1");
+  });
+
+  test("project drain tool forwards project name and cancellation options", async () => {
+    const drainProject = vi.fn(async () => ({
+      ok: true,
+      project_id: "project-1",
+      agents_drained: 2,
+      cancelled_queued: 1,
+      cancelled_running: 1,
+      active_execution_count: 0,
+    }));
+    const tools = createAgentHubMcpTools({
+      drainProject,
+    } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_drain_project")?.handler({
+      project: "oph",
+      cancelRunning: true,
+    })).resolves.toEqual({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          project_id: "project-1",
+          agents_drained: 2,
+          cancelled_queued: 1,
+          cancelled_running: 1,
+          active_execution_count: 0,
+        }, null, 2),
+      }],
+    });
+    expect(drainProject).toHaveBeenCalledWith("oph", { cancelRunning: true });
   });
 
   test("scheduler status tool forwards filter options", async () => {
