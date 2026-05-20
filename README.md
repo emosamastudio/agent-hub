@@ -261,6 +261,7 @@ node packages/sdk/dist/cli.js alerts list --limit 20
 node packages/sdk/dist/cli.js alerts acknowledge <alert-id> --by agent
 node packages/sdk/dist/cli.js executions list --status queued --limit 20
 node packages/sdk/dist/cli.js executions get <execution-id>
+node packages/sdk/dist/cli.js executions wait <execution-id> --timeout-ms 600000 --interval-ms 1000 --require-success
 node packages/sdk/dist/cli.js executions cancel <execution-id>
 node packages/sdk/dist/cli.js executions rerun <execution-id>
 node packages/sdk/dist/cli.js traces list <execution-id>
@@ -275,6 +276,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 `scheduler status` returns the control-plane scheduler snapshot for active agents, including queued/running counts, active concurrency, queue capacity, dispatch state, schedule state, cron due timestamp, and next run timestamp. Use it before debugging a worker to distinguish "nothing due", "executor offline", "queue full", and "ready to dispatch".
 
 `executors list` shows online executor heartbeats and active execution counts. `alerts list` and `alerts acknowledge` expose the operational alert loop for agents, so a coding agent can inspect queue/failure pressure and mark handled alerts without using the dashboard.
+
+`executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
 
@@ -315,6 +318,7 @@ Exposed tools:
 - `agent_hub_drain_agent`
 - `agent_hub_list_executions`
 - `agent_hub_get_execution`
+- `agent_hub_wait_execution`
 - `agent_hub_list_traces`
 - `agent_hub_trigger_agent`
 - `agent_hub_set_agent_enabled`

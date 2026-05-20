@@ -224,7 +224,11 @@ node packages/sdk/dist/cli.js trigger deep_research \
   --dedup-policy allow_duplicate
 ```
 
-Then OPH should be able to poll and report it through the Go SDK.
+Then OPH should be able to poll and report it through the Go SDK. Use the returned execution id to wait for the terminal status:
+
+```bash
+node packages/sdk/dist/cli.js executions wait <execution-id> --timeout-ms 600000 --require-success
+```
 
 Useful checks:
 

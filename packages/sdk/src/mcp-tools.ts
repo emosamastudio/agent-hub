@@ -14,6 +14,7 @@ import {
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
   type AgentHubUpdateAgentInput,
+  type AgentHubWaitExecutionOptions,
 } from "./index.js";
 
 export interface AgentHubMcpTextResult {
@@ -310,6 +311,21 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         executionId: z.string().min(1),
       },
       handler: async (args) => toMcpText(await client.getExecution(args.executionId as string)),
+    },
+    {
+      name: "agent_hub_wait_execution",
+      description: "Poll one execution until it reaches success, failed, timeout, or cancelled.",
+      inputSchema: {
+        executionId: z.string().min(1),
+        timeoutMs: z.number().int().min(0).optional(),
+        intervalMs: z.number().int().min(0).optional(),
+        requireSuccess: z.boolean().optional(),
+      },
+      handler: async (args) => toMcpText(await client.waitForExecution(args.executionId as string, compactDefined({
+        timeoutMs: numberArg(args.timeoutMs),
+        intervalMs: numberArg(args.intervalMs),
+        requireSuccess: booleanArg(args.requireSuccess),
+      }) as AgentHubWaitExecutionOptions)),
     },
     {
       name: "agent_hub_list_traces",

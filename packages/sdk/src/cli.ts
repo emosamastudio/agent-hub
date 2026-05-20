@@ -20,6 +20,7 @@ import {
   type AgentHubSchedulerStatusQuery,
   type AgentHubTriggerOptions,
   type AgentHubUpdateAgentInput,
+  type AgentHubWaitExecutionOptions,
 } from "./index.js";
 
 type Env = Record<string, string | undefined>;
@@ -48,6 +49,7 @@ type CliInvocation =
   | { command: "agents:drain"; agentId: string; options: AgentHubDrainAgentOptions }
   | { command: "executions:list"; query: AgentHubListExecutionsQuery }
   | { command: "executions:get"; executionId: string }
+  | { command: "executions:wait"; executionId: string; options: AgentHubWaitExecutionOptions }
   | { command: "executions:cancel"; executionId: string }
   | { command: "executions:rerun"; executionId: string }
   | { command: "traces:list"; executionId: string }
@@ -317,6 +319,18 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       if (!third) throw new Error("Usage: agent-hub executions get <execution-id>");
       return { command: "executions:get", executionId: third };
     }
+    if (subcommand === "wait") {
+      if (!third) throw new Error("Usage: agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000]");
+      return {
+        command: "executions:wait",
+        executionId: third,
+        options: compactDefined({
+          timeoutMs: numberFlag(parsed.flags, "timeout-ms"),
+          intervalMs: numberFlag(parsed.flags, "interval-ms"),
+          requireSuccess: parsed.flags["require-success"] === true ? true : undefined,
+        }),
+      };
+    }
     if (subcommand === "cancel") {
       if (!third) throw new Error("Usage: agent-hub executions cancel <execution-id>");
       return { command: "executions:cancel", executionId: third };
@@ -416,6 +430,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.listExecutions(invocation.query);
     case "executions:get":
       return client.getExecution(invocation.executionId);
+    case "executions:wait":
+      return client.waitForExecution(invocation.executionId, invocation.options);
     case "executions:cancel":
       return client.cancelExecution(invocation.executionId);
     case "executions:rerun":
@@ -610,6 +626,7 @@ function helpText(): string {
   agent-hub agents delete <agent-id>
   agent-hub executions list [--agent-id <id>] [--status queued] [--trigger-type api] [--limit 50] [--offset 0]
   agent-hub executions get <execution-id>
+  agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000] [--require-success]
   agent-hub executions cancel <execution-id>
   agent-hub executions rerun <execution-id>
   agent-hub traces list <execution-id>

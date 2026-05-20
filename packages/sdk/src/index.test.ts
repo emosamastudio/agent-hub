@@ -1281,4 +1281,71 @@ describe("AgentHubControlClient", () => {
     });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  test("waitForExecution polls until the execution reaches a terminal status", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      requests.push(input.toString());
+      if (requests.length === 1) {
+        return jsonResponse({ id: "exec-1", status: "running" });
+      }
+      return jsonResponse({ id: "exec-1", status: "success", resultSummary: "done" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.waitForExecution("exec-1", {
+      intervalMs: 0,
+      timeoutMs: 1000,
+    })).resolves.toEqual({
+      id: "exec-1",
+      status: "success",
+      resultSummary: "done",
+    });
+    expect(requests).toEqual([
+      "http://hub/api/executions/exec-1",
+      "http://hub/api/executions/exec-1",
+    ]);
+  });
+
+  test("waitForExecution rejects when the execution does not finish before timeout", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "exec-1", status: "queued" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.waitForExecution("exec-1", {
+      intervalMs: 0,
+      timeoutMs: 0,
+    })).rejects.toThrow(/timed out/);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  test("waitForExecution can require a successful terminal status", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "exec-1", status: "failed" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.waitForExecution("exec-1", {
+      requireSuccess: true,
+    })).rejects.toThrow(/terminal status failed/);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

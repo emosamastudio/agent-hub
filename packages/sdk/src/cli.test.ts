@@ -40,6 +40,37 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses execution wait invocations", () => {
+    expect(parseCliInvocation([
+      "executions",
+      "wait",
+      "exec-1",
+      "--timeout-ms",
+      "60000",
+      "--interval-ms",
+      "250",
+    ])).toEqual({
+      command: "executions:wait",
+      executionId: "exec-1",
+      options: {
+        timeoutMs: 60000,
+        intervalMs: 250,
+      },
+    });
+    expect(parseCliInvocation([
+      "executions",
+      "wait",
+      "exec-1",
+      "--require-success",
+    ])).toEqual({
+      command: "executions:wait",
+      executionId: "exec-1",
+      options: {
+        requireSuccess: true,
+      },
+    });
+  });
+
   test("parses scheduler status invocations", () => {
     expect(parseCliInvocation(["scheduler", "status", "--agent-id", "agent-1"])).toEqual({
       command: "scheduler:status",

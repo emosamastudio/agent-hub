@@ -97,6 +97,7 @@ node packages/sdk/dist/cli.js trigger enrich_repo \
   --payload '{"repo_name":"agent-hub-smoke"}' \
   --dedup-policy allow_duplicate
 node packages/sdk/dist/cli.js executions list --limit 5
+node packages/sdk/dist/cli.js executions wait <execution-id> --timeout-ms 600000 --require-success
 ```
 
 Use a low-risk OPH handler for first smoke. Run `deep_research` only during the formal canary because it can invoke sidecars/LLMs and write research artifacts.

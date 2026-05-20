@@ -138,6 +138,12 @@ export interface AgentHubDrainAgentOptions {
   cancelRunning?: boolean;
 }
 
+export interface AgentHubWaitExecutionOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  requireSuccess?: boolean;
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -195,6 +201,18 @@ export interface AgentHubUpdateAgentInput {
 
 type QueryValue = string | number | boolean | null | undefined;
 type AuthMode = 'none' | 'dashboard' | 'apiKey';
+
+const terminalExecutionStatuses = new Set(['success', 'failed', 'timeout', 'cancelled']);
+
+function executionStatus(record: unknown): string | null {
+  if (!record || typeof record !== 'object') return null;
+  const status = (record as { status?: unknown }).status;
+  return typeof status === 'string' ? status : null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class AgentHubControlClient {
   private config: Required<Pick<AgentHubControlConfig, 'serverUrl'>> & Omit<AgentHubControlConfig, 'serverUrl'>;
@@ -333,6 +351,32 @@ export class AgentHubControlClient {
 
   async getExecution(id: string): Promise<unknown> {
     return this.requestJson('GET', `/api/executions/${encodeURIComponent(id)}`, undefined, 'dashboard');
+  }
+
+  async waitForExecution(
+    executionId: string,
+    options: AgentHubWaitExecutionOptions = {},
+  ): Promise<unknown> {
+    const timeoutMs = Math.max(0, options.timeoutMs ?? 10 * 60 * 1000);
+    const intervalMs = Math.max(0, options.intervalMs ?? 1000);
+    const startedAt = Date.now();
+
+    while (true) {
+      const execution = await this.getExecution(executionId);
+      const status = executionStatus(execution);
+      if (status && terminalExecutionStatuses.has(status)) {
+        if (options.requireSuccess === true && status !== 'success') {
+          throw new Error(`Agent Hub execution ${executionId} finished with terminal status ${status}`);
+        }
+        return execution;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(`Agent Hub execution ${executionId} wait timed out after ${timeoutMs}ms`);
+      }
+
+      await sleep(intervalMs);
+    }
   }
 
   async getExecutionTraces(executionId: string): Promise<unknown[]> {

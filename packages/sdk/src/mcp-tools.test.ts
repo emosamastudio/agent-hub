@@ -25,6 +25,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_drain_agent",
       "agent_hub_list_executions",
       "agent_hub_get_execution",
+      "agent_hub_wait_execution",
       "agent_hub_list_traces",
       "agent_hub_trigger_agent",
       "agent_hub_set_agent_enabled",
@@ -455,6 +456,31 @@ describe("Agent Hub MCP tools", () => {
       ],
     });
     expect(drainAgent).toHaveBeenCalledWith("agent-1", { cancelRunning: true });
+  });
+
+  test("wait execution tool forwards polling options", async () => {
+    const waitForExecution = vi.fn(async () => ({ id: "exec-1", status: "success" }));
+    const tools = createAgentHubMcpTools({ waitForExecution } as any);
+    const waitTool = tools.find((tool) => tool.name === "agent_hub_wait_execution");
+
+    await expect(waitTool?.handler({
+      executionId: "exec-1",
+      timeoutMs: 60000,
+      intervalMs: 250,
+      requireSuccess: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "exec-1", status: "success" }, null, 2),
+        },
+      ],
+    });
+    expect(waitForExecution).toHaveBeenCalledWith("exec-1", {
+      timeoutMs: 60000,
+      intervalMs: 250,
+      requireSuccess: true,
+    });
   });
 
   test("cancel and rerun tools forward execution ids", async () => {
