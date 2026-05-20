@@ -1,5 +1,7 @@
 import type { Db } from "./repository.js";
 import { projects, agents, providerPricing } from "./schema.js";
+import { serverConfig } from "../config.js";
+import { hashApiKey, hashPassword } from "../security.js";
 
 export async function seedIfEmpty(db: Db) {
   const existing = await db.select().from(projects).limit(1);
@@ -9,7 +11,8 @@ export async function seedIfEmpty(db: Db) {
     name: "default",
     displayName: "Default Project",
     description: "Default project for local development",
-    dashboardPasswordHash: "admin",
+    apiKeyHash: hashApiKey(serverConfig.defaultProjectApiKey),
+    dashboardPasswordHash: hashPassword(serverConfig.dashboardPassword),
   }).returning();
 
   await db.insert(agents).values({

@@ -1,7 +1,7 @@
 import {
   pgTable, uuid, text, integer, timestamp, boolean,
   jsonb, numeric, pgEnum, bigserial, primaryKey, date,
-  uniqueIndex,
+  index, uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const triggerTypeEnum = pgEnum("trigger_type", [
@@ -31,7 +31,9 @@ export const projects = pgTable("projects", {
   costConfig: jsonb("cost_config").default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  apiKeyHashIdx: index("idx_projects_api_key_hash").on(table.apiKeyHash),
+}));
 
 // --- agents ---
 export const agents = pgTable("agents", {
@@ -61,10 +63,12 @@ export const agents = pgTable("agents", {
   lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
   lastExecutionAt: timestamp("last_execution_at", { withTimezone: true }),
   activeExecutionCount: integer("active_execution_count").notNull().default(0),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   projectNameIdx: uniqueIndex("idx_agents_project_name").on(table.projectId, table.name),
+  archivedAtIdx: index("idx_agents_archived_at").on(table.archivedAt),
 }));
 
 // --- executions ---
@@ -83,6 +87,8 @@ export const executions = pgTable("executions", {
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   durationMs: integer("duration_ms"),
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  progressPercent: integer("progress_percent"),
+  progressMessage: text("progress_message"),
   inputPayload: jsonb("input_payload"),
   resultSummary: text("result_summary"),
   resultData: jsonb("result_data"),
@@ -95,7 +101,12 @@ export const executions = pgTable("executions", {
   retryOf: uuid("retry_of"),
   executorHost: text("executor_host"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  statusScheduledIdx: index("idx_executions_status_scheduled_at").on(table.status, table.scheduledAt),
+  agentStatusIdx: index("idx_executions_agent_status").on(table.agentId, table.status),
+  agentIdempotencyIdx: index("idx_executions_agent_idempotency_created_at").on(table.agentId, table.idempotencyKey, table.createdAt),
+  retryOfIdx: index("idx_executions_retry_of").on(table.retryOf),
+}));
 
 // --- traces ---
 export const traces = pgTable("traces", {
@@ -118,7 +129,9 @@ export const traces = pgTable("traces", {
   latencyMs: integer("latency_ms"),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  executionIdx: index("idx_traces_execution_id").on(table.executionId),
+}));
 
 // --- agent_cooldowns ---
 export const agentCooldowns = pgTable("agent_cooldowns", {
@@ -138,6 +151,8 @@ export const alertLog = pgTable("alert_log", {
   agentId: uuid("agent_id").references(() => agents.id),
   message: text("message").notNull(),
   context: jsonb("context"),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  acknowledgedBy: text("acknowledged_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

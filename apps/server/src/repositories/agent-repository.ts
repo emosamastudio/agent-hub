@@ -1,39 +1,64 @@
-import { and, eq, sql, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql, lt } from "drizzle-orm";
 import { agents } from "../db/schema.js";
 import type { Db } from "../db/repository.js";
 
 type AgentRow = typeof agents.$inferSelect;
+type AgentLookupOptions = { includeArchived?: boolean };
+type AgentArchiveFilter = "active" | "include" | "only";
 
 export class AgentRepository {
   constructor(private db: Db) {}
 
-  async findAll(filters?: { projectId?: string; agentType?: string; executorStatus?: string; enabled?: boolean }) {
+  async findAll(filters?: {
+    projectId?: string;
+    agentType?: string;
+    executorStatus?: string;
+    enabled?: boolean;
+    includeArchived?: boolean;
+    archived?: AgentArchiveFilter;
+  }) {
     const conditions = [];
+    if (filters?.archived === "only") {
+      conditions.push(isNotNull(agents.archivedAt));
+    } else if (filters?.archived !== "include" && !filters?.includeArchived) {
+      conditions.push(isNull(agents.archivedAt));
+    }
     if (filters?.projectId) conditions.push(eq(agents.projectId, filters.projectId));
     if (filters?.agentType) conditions.push(eq(agents.agentType, filters.agentType));
     if (filters?.executorStatus) conditions.push(eq(agents.executorStatus, filters.executorStatus));
     if (filters?.enabled !== undefined) conditions.push(eq(agents.enabled, filters.enabled));
 
-    let q = this.db.select().from(agents);
+    let q = this.db.select().from(agents).$dynamic();
     if (conditions.length) q = q.where(and(...conditions));
     return q.orderBy(agents.createdAt);
   }
 
-  async findById(id: string) {
-    const rows = await this.db.select().from(agents).where(eq(agents.id, id)).limit(1);
+  async findById(id: string, options: AgentLookupOptions = {}) {
+    const conditions = [eq(agents.id, id)];
+    if (!options.includeArchived) conditions.push(isNull(agents.archivedAt));
+    const rows = await this.db.select().from(agents).where(and(...conditions)).limit(1);
     return rows[0] ?? null;
   }
 
-  async findByProjectAndName(projectId: string, name: string) {
+  async findByProjectAndName(projectId: string, name: string, options: AgentLookupOptions = {}) {
+    const conditions = [eq(agents.projectId, projectId), eq(agents.name, name)];
+    if (!options.includeArchived) conditions.push(isNull(agents.archivedAt));
     const rows = await this.db.select().from(agents).where(
-      and(eq(agents.projectId, projectId), eq(agents.name, name))
+      and(...conditions)
     ).limit(1);
     return rows[0] ?? null;
   }
 
+  async findByProjectAndNames(projectId: string, names: string[]) {
+    if (names.length === 0) return [];
+    return this.db.select().from(agents).where(
+      and(eq(agents.projectId, projectId), inArray(agents.name, names), isNull(agents.archivedAt))
+    ).orderBy(agents.createdAt);
+  }
+
   async findEnabledWithCron() {
     return this.db.select().from(agents)
-      .where(and(eq(agents.enabled, true), sql`${agents.cronExpression} IS NOT NULL`))
+      .where(and(eq(agents.enabled, true), isNull(agents.archivedAt), sql`${agents.cronExpression} IS NOT NULL`))
       .orderBy(agents.createdAt);
   }
 
@@ -41,15 +66,22 @@ export class AgentRepository {
     return this.db.select().from(agents).where(
       and(
         eq(agents.executorStatus, "online"),
+        isNull(agents.archivedAt),
         lt(agents.lastHeartbeatAt, sql`now() - interval '${sql.raw(String(thresholdSeconds))} seconds'`)
       )
     );
   }
 
   async upsert(projectId: string, name: string, input: Partial<typeof agents.$inferInsert>) {
-    const existing = await this.findByProjectAndName(projectId, name);
+    const existing = await this.findByProjectAndName(projectId, name, { includeArchived: true });
     if (existing) {
-      const rows = await this.db.update(agents).set({ ...input, updatedAt: new Date() })
+      const update: Partial<AgentRow> = { ...input, updatedAt: new Date() } as Partial<AgentRow>;
+      if (existing.archivedAt) {
+        update.archivedAt = null;
+        update.enabled = input.enabled ?? true;
+        update.activeExecutionCount = 0;
+      }
+      const rows = await this.db.update(agents).set(update as any)
         .where(eq(agents.id, existing.id)).returning();
       return rows[0];
     }
@@ -104,6 +136,13 @@ export class AgentRepository {
     }).where(eq(agents.id, id));
   }
 
+  async decrementExecutionCountBy(id: string, count: number) {
+    if (count <= 0) return;
+    await this.db.update(agents).set({
+      activeExecutionCount: sql`GREATEST(${agents.activeExecutionCount} - ${count}, 0)`,
+    }).where(eq(agents.id, id));
+  }
+
   async resetAllExecutionCounts() {
     await this.db.execute(sql`
       UPDATE agents SET active_execution_count = (
@@ -115,10 +154,22 @@ export class AgentRepository {
   }
 
   async delete(id: string) {
-    await this.db.delete(agents).where(eq(agents.id, id));
+    await this.db.update(agents).set({
+      archivedAt: new Date(),
+      enabled: false,
+      executorStatus: "offline",
+      activeExecutionCount: 0,
+      updatedAt: new Date(),
+    }).where(eq(agents.id, id));
   }
 
   async deregisterByName(projectId: string, name: string) {
-    await this.db.delete(agents).where(and(eq(agents.projectId, projectId), eq(agents.name, name)));
+    await this.db.update(agents).set({
+      archivedAt: new Date(),
+      enabled: false,
+      executorStatus: "offline",
+      activeExecutionCount: 0,
+      updatedAt: new Date(),
+    }).where(and(eq(agents.projectId, projectId), eq(agents.name, name), isNull(agents.archivedAt)));
   }
 }

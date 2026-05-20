@@ -1,199 +1,323 @@
 # Agent Hub
 
-Local-first TypeScript control plane and dashboard for monitoring multiple coding agents from one place.
+Independent local-first Agent Cron / Job control plane for scheduling, dispatching, monitoring, and tracing AI agent tasks across projects.
+
+Agent Hub is the platform. Business repositories are consumers: they register agents through the SDK/API, poll for work, execute in their own codebases, and report results back.
 
 ## Workspace layout
 
-- `apps/server`: Fastify + WebSocket + SQLite control plane
+- `apps/server`: Fastify + PostgreSQL + Drizzle control plane
 - `apps/web`: React + Vite dashboard
-- `packages/shared`: normalized shared contracts for agents, runs, inbox items, and events
+- `packages/sdk`: TypeScript SDK for Node.js executors
+- `packages/shared`: shared platform API contracts
+- `sdks/go/agenthub`: Go SDK for executor workers in Go projects
 
 ## Run locally
 
 ```bash
 npm install
+docker compose up -d
+npm run db:migrate -w @agent-hub/server
 npm run dev
 ```
 
 Default local endpoints:
 
-- Dashboard: `http://127.0.0.1:5173`
-- Server: `http://127.0.0.1:8787`
-- Health: `http://127.0.0.1:8787/health`
+- Dashboard: `http://127.0.0.1:5174`
+- Server: `http://127.0.0.1:8788`
+- Health: `http://127.0.0.1:8788/api/health`
 
-Optional server env flags:
+Default development credentials:
 
-- `AGENT_HUB_ENABLE_MOCK_RUNTIME=true` to enable demo activity
-- `AGENT_HUB_ENABLE_COPILOT_DISCOVERY=false` to disable live Copilot session discovery
-- `AGENT_HUB_ENABLE_CLAUDE_DISCOVERY=false` to disable live Claude Code session discovery
-- `AGENT_HUB_ENABLE_GEMINI_DISCOVERY=false` to disable live Gemini CLI session discovery
-- `AGENT_HUB_ENABLE_OPENCLAW_DISCOVERY=false` to disable live OpenClaw discovery
-- `AGENT_HUB_COPILOT_SESSION_STATE_DIR=/path/to/session-state` to override the local Copilot session-state directory
-- `AGENT_HUB_COPILOT_BIN=/path/to/copilot` to override the Copilot CLI binary used for SDK-backed runtime actions
-- `AGENT_HUB_COPILOT_SDK_MODULE_PATH=/path/to/copilot-sdk/index.js` to override the local Copilot SDK module path used for session resume
-- `AGENT_HUB_CLAUDE_BIN=/path/to/claude` to override the Claude Code CLI binary used for auth checks and session resume
-- `AGENT_HUB_CLAUDE_PROJECTS_DIR=/path/to/.claude/projects` to override the local Claude Code projects directory
-- `AGENT_HUB_GEMINI_BIN=/path/to/gemini` to override the Gemini CLI binary used for local prompt dispatch
-- `AGENT_HUB_GEMINI_STATE_DIR=/path/to/.gemini` to override the local Gemini CLI state directory
-- `AGENT_HUB_OPENCLAW_STATE_DIR=/path/to/.openclaw` to override the local OpenClaw state directory passed into `openclaw status --json`
-- `AGENT_HUB_OPENCLAW_BIN=/path/to/openclaw` to override the OpenClaw CLI binary used for discovery
-- `AGENT_HUB_COPILOT_POLL_MS=5000` to change Copilot discovery polling frequency
-- `AGENT_HUB_CLAUDE_POLL_MS=5000` to change Claude Code discovery polling frequency
-- `AGENT_HUB_GEMINI_POLL_MS=5000` to change Gemini CLI discovery polling frequency
-- `AGENT_HUB_OPENCLAW_POLL_MS=10000` to change OpenClaw discovery polling frequency
-- `AGENT_HUB_ENABLE_DESKTOP_NOTIFICATIONS=false` to disable local desktop alerts
-- `AGENT_HUB_NOTIFICATION_COOLDOWN_MS=90000` to change notification dedupe cooldown
+- Dashboard Basic Auth: username/password default to `admin` / `admin` in local dev. If changed, set both server env (`AGENT_HUB_DASHBOARD_USER`, `AGENT_HUB_DASHBOARD_PASSWORD`) and dashboard env (`VITE_AGENT_HUB_DASHBOARD_USER`, `VITE_AGENT_HUB_DASHBOARD_PASSWORD`).
+- SDK/API key: `agent_hub_dev_key`
 
-## Current MVP
+Override these in `.env` before exposing the server beyond localhost.
 
-- Unified snapshot API for agents, runs, inbox, and events
-- Real-time WebSocket updates
-- SQLite-backed seeded demo data
-- Live Copilot CLI session discovery from local `~/.copilot/session-state` locks
-- Rich Copilot session context from local `workspace.yaml` and `events.jsonl` metadata, including session age, branch, summary count, and Copilot version
-- Live Claude Code session discovery from local `~/.claude/projects` logs plus active Claude CLI processes
-- Live Gemini CLI session discovery from local `~/.gemini/tmp/*/chats/session-*.json` files plus active Gemini CLI processes
-- Live OpenClaw discovery from `openclaw status --json` plus local OpenClaw process/gateway signals
-- Mock runtime/adapters for local development
-- Generic HTTP ingest API for real local agents and sidecars
-- Thin adapter kit with a zero-dependency reference sidecar for runtimes that cannot be discovered directly
-- Workspace-first operator filters for search, runtime, workspace, and attention
-- Local inbox triage controls for acknowledge, snooze, and mute
-- Selected-run operator console with timeline, focus state, and local workspace shortcuts
-- Project / session / task topology projected from the live control plane, now with persisted task ownership, operator-completable handoff flows, and persisted task priority so operators can assign work, declare transfer intent, complete ownership transfer, and change queue ordering without pretending a full scheduler already exists
-- Runtime-level resource governance foundation: persisted per-platform slot limits plus live occupancy/pressure descriptors so operators can see capacity saturation without pretending a scheduler already exists
-- Safe local workspace actions for opening an agent workspace in Finder or Terminal, plus revealing supported local session paths and runtime state folders for Copilot, Claude Code, Gemini CLI, and OpenClaw
-- Truthful Claude Code runtime bridge: prompt dispatch by locally resuming a discovered session through `claude --resume` when Agent Hub can prove a session id, a session log path, and a logged-in local Claude CLI
-- Truthful Gemini CLI runtime bridge: prompt dispatch by locally resuming a discovered session through `gemini -p ... --resume <sessionId>` when Agent Hub can prove a session id, a session file path, and a usable local Gemini auth posture
-- Truthful Copilot runtime bridge: prompt dispatch by locally resuming a discovered session through the Copilot SDK when Agent Hub can prove both a session id and session-state path
-- Truthful sidecar runtime bridge: prompt dispatch by calling a sidecar-declared loopback callback only when the external-ingest agent publishes both a local `runtimeActionEndpoint` and `runtimeActionTargets: ["send_prompt"]`
-- Truthful OpenClaw runtime bridges: gateway recovery when the gateway is unreachable, plus session reset when Agent Hub can prove a live session key and healthy local gateway bridge
-- Persistent Chinese/English UI switch for dashboard chrome, operator controls, and roadmap content
-- Function-based dashboard navigation with dedicated Overview, Operations, Agents, Activity, and References pages plus focus jumps into the operator console
-- Curated reference catalog of high-star upstream GitHub projects
-- Local desktop notifications for approval-needed, paused, failed, and offline attention events
-- Truthful-gated operator actions: local demo/mock runs can be controlled, discovered sessions stay read-only for run lifecycle actions, and runtime-side controls only appear when Agent Hub can prove a real bridge
+## Core model
 
-## Connect a real local agent
+Agent Hub owns:
 
-By default Agent Hub now prioritizes **truthful local discovery** over demo data.  
-If you want to bring back seeded demo activity, start the server with mock updates enabled:
+- projects and API keys
+- agent registry
+- cron/manual/API trigger creation
+- queued/running/terminal execution state
+- executor polling and atomic claim
+- concurrency accounting
+- idempotency dedupe by agent/key
+- retries and retention cleanup
+- trace collection
+- dashboard views for agent lifecycle control, execution control, traces, and alerts
+
+Agent Hub does not own business execution logic. Executors run in their consumer project and communicate through API/SDK boundaries.
+
+## Environment
 
 ```bash
-AGENT_HUB_ENABLE_MOCK_RUNTIME=true npm run dev
+DATABASE_URL=postgres://agent_hub:agent_hub_dev@localhost:5433/agent_hub
+AGENT_HUB_HOST=127.0.0.1
+AGENT_HUB_PORT=8788
+AGENT_HUB_WEB_PORT=5174
+AGENT_HUB_DASHBOARD_USER=admin
+AGENT_HUB_DASHBOARD_PASSWORD=admin
+VITE_AGENT_HUB_DASHBOARD_USER=admin
+VITE_AGENT_HUB_DASHBOARD_PASSWORD=admin
+AGENT_HUB_DEFAULT_API_KEY=agent_hub_dev_key
+AGENT_HUB_SCHEDULER_TICK_MS=1000
+AGENT_HUB_EXECUTION_RETENTION_DAYS=90
+AGENT_HUB_TRACE_RETENTION_DAYS=30
+AGENT_HUB_MAX_TRIGGER_DEPTH=5
 ```
 
-Then push state into the generic ingest endpoint:
+## Minimal API flow
+
+Register an agent:
 
 ```bash
-curl -X POST http://127.0.0.1:8787/api/ingest \
+curl -X PUT http://127.0.0.1:8788/api/registry/agents \
+  -H "authorization: Bearer agent_hub_dev_key" \
   -H "content-type: application/json" \
   -d '{
-    "agent": {
-      "id": "agent-local-sidecar",
-      "name": "Local Sidecar",
-      "platform": "generic",
-      "workspacePath": "/Users/emosama/workspace/some-repo",
-      "state": "running",
-      "health": "healthy",
-      "attention": "info",
-      "currentRunId": "run-local-task",
-      "sessionMetadata": {
-        "runtimeActionEndpoint": "http://127.0.0.1:9191/runtime-actions",
-        "runtimeActionTargets": ["send_prompt"]
-      }
-    },
-    "run": {
-      "id": "run-local-task",
-      "title": "Stream local status into Agent Hub",
-      "state": "running",
-      "health": "healthy",
-      "attention": "info",
-      "progress": {
-        "phase": "executing",
-        "percent": 45,
-        "message": "Publishing updates from a local helper process."
-      }
-    },
-    "event": {
-      "type": "run.progress",
-      "message": "Local sidecar pushed a progress update into the hub."
-    }
+    "name": "demo_agent",
+    "displayName": "Demo Agent",
+    "agentType": "cron_task",
+    "handler": "demo_handler",
+    "cron": "*/5 * * * *",
+    "concurrency": 1
   }'
 ```
 
-## Thin adapter kit
-
-**Purpose:** connect runtimes that do not expose a stable local discovery signal.  
-**Value:** reuse one tiny sidecar contract instead of building bespoke Agent Hub glue for every tool.  
-**Acceptance:** the reference sidecar can publish live updates into `/api/ingest`, and it can optionally expose a truthful loopback `send_prompt` bridge back out of Agent Hub.
-
-Included in this repo:
-
-- `examples/reference-sidecar.mjs` - zero-dependency Node sidecar
-- `examples/reference-sidecar.example.json` - example watched state file
-- `npm run adapter:reference -- --help` - built-in usage help
-
-One-shot publish:
+Trigger work:
 
 ```bash
-npm run adapter:reference -- \
-  --agent-id agent-local-sidecar \
-  --name "Local Sidecar" \
-  --workspace /Users/emosama/workspace/some-repo \
-  --title "Bridge local runtime into Agent Hub"
+curl -X POST http://127.0.0.1:8788/api/agents/demo_agent/trigger \
+  -H "authorization: Bearer agent_hub_dev_key" \
+  -H "content-type: application/json" \
+  -d '{
+    "payload": { "demo": true },
+    "idempotency_key": "demo:once",
+    "dedup_policy": "skip_if_running"
+  }'
 ```
 
-Watched live updates from a JSON state file:
+Executor heartbeat and poll:
 
 ```bash
-npm run adapter:reference -- \
-  --state-file ./examples/reference-sidecar.example.json \
-  --watch \
-  --interval-ms 3000
+curl -X POST http://127.0.0.1:8788/api/executors/heartbeat \
+  -H "authorization: Bearer agent_hub_dev_key" \
+  -H "content-type: application/json" \
+  -d '{ "agent_names": ["demo_agent"] }'
+
+curl "http://127.0.0.1:8788/api/executors/poll?agent_names=demo_agent" \
+  -H "authorization: Bearer agent_hub_dev_key"
 ```
 
-When `--watch` is enabled, the sidecar keeps posting heartbeat-style refreshes on the interval and only emits an event when the normalized state payload changes.
-
-Loopback runtime bridge for `send_prompt`:
+Report completion:
 
 ```bash
-npm run adapter:reference -- \
-  --state-file ./examples/reference-sidecar.example.json \
-  --watch \
-  --action-port 9191 \
-  --prompt-log-file /tmp/reference-sidecar-prompts.jsonl
+curl -X POST http://127.0.0.1:8788/api/executions/<execution-id>/report \
+  -H "authorization: Bearer agent_hub_dev_key" \
+  -H "content-type: application/json" \
+  -d '{ "status": "success", "result_summary": "done" }'
 ```
 
-When `--action-port` is enabled, the sidecar injects a local `agent.sessionMetadata.runtimeActionEndpoint` plus `runtimeActionTargets: ["send_prompt"]` into the ingest payload, starts a loopback callback server on `127.0.0.1`, and writes an explicit `run.output` event back into Agent Hub when it receives a prompt dispatch.
+## TypeScript SDK
 
-The dashboard no longer pretends every visible session is controllable. If a run comes from Copilot discovery, Claude discovery, Gemini discovery, or generic ingest without a run-control bridge, approve/pause/resume/cancel stays disabled in the UI and the API rejects the action with an explicit read-only message.
+```ts
+import { AgentHubClient } from "@agent-hub/sdk";
 
-For Copilot CLI sessions, Agent Hub now also reads local `workspace.yaml` and `events.jsonl` files from `~/.copilot/session-state/<session-id>/` so the dashboard can show truthful local details like session age, branch, durable summary text, summary count, and Copilot version.
+const hub = new AgentHubClient({
+  serverUrl: "http://127.0.0.1:8788",
+  project: "default",
+  apiKey: "agent_hub_dev_key",
+});
 
-When a discovered Copilot session has both a visible `sessionId` and `sessionPath`, Agent Hub now exposes `send_prompt` as a truthful runtime action. The server resumes that local session through the Copilot SDK, waits until the new `user.message` is persisted into `events.jsonl`, and only then acknowledges the dispatch.
+hub.register({
+  name: "demo_agent",
+  displayName: "Demo Agent",
+  agentType: "cron_task",
+  cron: "*/5 * * * *",
+  handler: "demo_handler",
+});
 
-When a discovered Claude Code session has both a visible `sessionId` and `sessionPath`, Agent Hub can also expose `send_prompt` through `claude --resume` — but only if `claude auth status` proves the local Claude CLI is logged in. If Claude is installed but not logged in, the session stays visible while runtime control is downgraded to an explicit `auth_required` posture instead of a fake-controllable state.
+hub.handle("demo_agent", async (ctx) => {
+  return { received: ctx.payload };
+});
 
-When a discovered Gemini CLI session has both a visible `sessionId` and `sessionPath`, Agent Hub can also expose `send_prompt` through `gemini -p ... --resume <sessionId>` — but only if Agent Hub can prove a usable local Gemini auth posture. If Gemini session files are visible but auth is not configured yet, the session stays visible while runtime control is downgraded to an explicit `auth_required` posture instead of a fake-controllable state.
+await hub.start();
+```
 
-For OpenClaw, Agent Hub now shells out to `openclaw status --json` for runtime metadata and combines that with live local OpenClaw process/gateway signals. That means OpenClaw agents only appear when there is a truthful local runtime signal, and gateway-unreachable situations surface as degraded read-only runs instead of fake-controllable sessions.
+For deterministic tests or one-shot workers, call `await hub.runOnce()` to poll and execute at most one queued execution.
 
-For external-ingest sidecars, Agent Hub still keeps run lifecycle actions (`pause`, `resume`, `cancel`) read-only by default. It only exposes `send_prompt` when the sidecar explicitly declares a loopback callback endpoint and target list, and the current reference sidecar bridge is limited to `send_prompt`.
+## Go SDK
 
-Useful endpoints:
+The Go SDK is intended for Go services that run real executor workers in their
+own repository. It wraps registry sync, heartbeat/progress, poll, and final
+execution reporting.
 
-- `GET /api/integrations`: discover the current ingest endpoint and example payload
-- `POST /api/ingest`: upsert an agent, optionally upsert a run, and optionally append an event
-- `GET /api/projects`, `GET /api/sessions`, `GET /api/tasks`: inspect the current project/session/task topology projected from the truthful control plane, including persisted task ownership and handoff metadata
-- `GET /api/resources`: inspect per-runtime capacity, live occupancy, waiting load, and pressure descriptors derived from the current control-plane snapshot
-- `POST /api/runs/:id/actions`: apply a truthful run action only when that runtime actually has a supported control path
-- `POST /api/tasks/:id/runtime-actions`: dispatch task-scoped runtime actions such as prompt continuation through the task's currently bound local session
-- `POST /api/tasks/:id/assignment`: assign, reassign, or clear a persisted task owner without breaking the underlying run/session truth model
-- `POST /api/tasks/:id/priority`: raise, lower, or reset a persisted task priority so projected task ordering and audit history can change truthfully without implying automatic dispatch
-- `POST /api/tasks/:id/handoff`: create, update, or clear a pending task handoff request while keeping the current owner and bound runtime session explicit
-- `POST /api/tasks/:id/handoff-actions`: complete a pending task handoff so task-plane ownership moves to the requested target while the bound runtime session remains explicit
-- `POST /api/resources/:platform/policy`: set or clear a persisted platform-level slot limit so the dashboard can surface saturation and overcommitment truthfully
-- `POST /api/agents/:id/runtime-actions`: trigger truthful local runtime actions for agents that expose them, including Claude Code prompt dispatch, Gemini CLI prompt dispatch (when local auth is usable), Copilot prompt dispatch, sidecar loopback prompt dispatch, plus OpenClaw gateway recovery and session reset
-- `POST /api/agents/:id/workspace-actions`: open the selected agent workspace in Finder or Terminal, reveal a supported local session path such as the Copilot session-state folder or a local Claude/Gemini session file, or open the runtime state folder for supported local runtimes
-- `GET /api/references`: fetch a curated list of high-star upstream projects worth reusing from Agent Hub
+```go
+package main
+
+import (
+	"context"
+
+	agenthub "github.com/emosamastudio/agent-hub/sdks/go/agenthub"
+)
+
+func main() {
+	client := agenthub.NewClient(agenthub.Config{
+		ServerURL: "http://127.0.0.1:8788",
+		Project:   "default",
+		APIKey:    "agent_hub_dev_key",
+	})
+
+	client.Register(agenthub.AgentSpec{
+		Name:        "demo_go_worker",
+		DisplayName: "Demo Go Worker",
+		AgentType:   agenthub.AgentTypeCronTask,
+		Handler:     "demo_go_handler",
+	})
+
+	mux := agenthub.NewServeMux()
+	mux.HandleFunc("demo_go_handler", func(ctx *agenthub.Context, job *agenthub.Job) error {
+		ctx.Log("received payload: %#v", ctx.Payload())
+		_, _ = ctx.Progress(50, "working")
+		return nil
+	})
+
+	if err := client.Run(context.Background(), mux); err != nil {
+		panic(err)
+	}
+}
+```
+
+For local source integration before a tagged release, consumers can use a Go
+module replace:
+
+```go
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.0.0
+
+replace github.com/emosamastudio/agent-hub/sdks/go/agenthub => ../agent-hub/sdks/go/agenthub
+```
+
+## Demo Node Worker
+
+The SDK package includes a real worker example that registers `demo_node_worker`, polls through the executor protocol, reports progress, records log/custom trace spans, and reports the result through the SDK.
+
+```bash
+npm run build -w @agent-hub/sdk
+npm run hub:demo-worker -- --once
+```
+
+Use `--once` to register the demo agent and process at most one queued execution. Omit `--once` to keep the worker running.
+
+## Agent CLI
+
+`@agent-hub/sdk` also builds an `agent-hub` CLI for coding agents and local scripts. It uses dashboard Basic Auth for dashboard CRUD/operation APIs and the project API key for agent trigger APIs.
+
+```bash
+npm run build -w @agent-hub/sdk
+
+node packages/sdk/dist/cli.js health
+npm run hub -- health
+node packages/sdk/dist/cli.js projects list
+node packages/sdk/dist/cli.js projects ensure oph \
+  --display-name "Open Source Project Hunter" \
+  --description "OPH executor integration"
+node packages/sdk/dist/cli.js projects create oph \
+  --display-name "Open Source Project Hunter" \
+  --description "OPH executor integration"
+node packages/sdk/dist/cli.js projects rotate-key <project-id>
+node packages/sdk/dist/cli.js scheduler status --agent-id <agent-id>
+node packages/sdk/dist/cli.js agents list --status online
+node packages/sdk/dist/cli.js agents list --archived only
+node packages/sdk/dist/cli.js agents get <agent-id> --include-archived
+node packages/sdk/dist/cli.js agents create demo_agent \
+  --display-name "Demo Agent" \
+  --type cron_task \
+  --cron "*/5 * * * *" \
+  --handler demo_handler \
+  --concurrency 1 \
+  --timeout-seconds 600
+node packages/sdk/dist/cli.js agents update <agent-id> \
+  --cron "*/15 * * * *" \
+  --retry-max 1
+node packages/sdk/dist/cli.js agents schedule-preview <agent-id> --limit 5
+node packages/sdk/dist/cli.js agents disable <agent-id>
+node packages/sdk/dist/cli.js agents enable <agent-id>
+node packages/sdk/dist/cli.js agents drain <agent-id> --cancel-running
+node packages/sdk/dist/cli.js agents delete <agent-id>
+node packages/sdk/dist/cli.js executors list
+node packages/sdk/dist/cli.js alerts list --limit 20
+node packages/sdk/dist/cli.js alerts acknowledge <alert-id> --by agent
+node packages/sdk/dist/cli.js executions list --status queued --limit 20
+node packages/sdk/dist/cli.js executions get <execution-id>
+node packages/sdk/dist/cli.js executions cancel <execution-id>
+node packages/sdk/dist/cli.js executions rerun <execution-id>
+node packages/sdk/dist/cli.js traces list <execution-id>
+node packages/sdk/dist/cli.js trigger demo_agent \
+  --payload '{"source":"cli"}' \
+  --idempotency-key demo:cli \
+  --dedup-policy skip_if_running
+```
+
+`agents drain` disables scheduling and executor polling for an agent, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided. `agents delete` and registry deregistration refuse agents that still have queued or running executions. Cancel or drain active work before deleting an agent. Once accepted, delete/deregister archives the agent, removes it from active dashboard/API lists, disables scheduling and executor polling for it, and preserves terminal execution/trace history for audit. Use `agents list --archived only` and `agents get --include-archived` to inspect archived agents and their retained history.
+
+`scheduler status` returns the control-plane scheduler snapshot for active agents, including queued/running counts, active concurrency, queue capacity, dispatch state, schedule state, cron due timestamp, and next run timestamp. Use it before debugging a worker to distinguish "nothing due", "executor offline", "queue full", and "ready to dispatch".
+
+`executors list` shows online executor heartbeats and active execution counts. `alerts list` and `alerts acknowledge` expose the operational alert loop for agents, so a coding agent can inspect queue/failure pressure and mark handled alerts without using the dashboard.
+
+`projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
+
+CLI connection defaults match local dev:
+
+- `AGENT_HUB_URL` or `--url`, default `http://127.0.0.1:8788`
+- `AGENT_HUB_API_KEY` or `--api-key`, default `agent_hub_dev_key`
+- `AGENT_HUB_DASHBOARD_USER` or `--dashboard-user`, default `admin`
+- `AGENT_HUB_DASHBOARD_PASSWORD` or `--dashboard-password`, default `admin`
+
+## Agent MCP Server
+
+The same SDK package also builds a stdio MCP server for MCP-capable coding agents. It exposes the same control-plane operations as tools and uses the same environment variables as the CLI.
+
+```bash
+npm run build -w @agent-hub/sdk
+npm run hub:mcp
+```
+
+Exposed tools:
+
+- `agent_hub_health`
+- `agent_hub_list_projects`
+- `agent_hub_ensure_project`
+- `agent_hub_create_project`
+- `agent_hub_rotate_project_api_key`
+- `agent_hub_get_scheduler_status`
+- `agent_hub_list_executors`
+- `agent_hub_list_alerts`
+- `agent_hub_acknowledge_alert`
+- `agent_hub_list_agents`
+- `agent_hub_get_agent`
+- `agent_hub_create_agent`
+- `agent_hub_update_agent`
+- `agent_hub_preview_agent_schedule`
+- `agent_hub_delete_agent`
+- `agent_hub_drain_agent`
+- `agent_hub_list_executions`
+- `agent_hub_get_execution`
+- `agent_hub_list_traces`
+- `agent_hub_trigger_agent`
+- `agent_hub_set_agent_enabled`
+- `agent_hub_cancel_execution`
+- `agent_hub_rerun_execution`
+
+## Development checks
+
+```bash
+npm run typecheck
+npm run lint -w @agent-hub/web
+npm test -w @agent-hub/server
+npm test -w @agent-hub/sdk
+(cd sdks/go/agenthub && go test ./...)
+npm run build
+```

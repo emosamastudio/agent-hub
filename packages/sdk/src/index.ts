@@ -25,10 +25,13 @@ export interface AgentSpec {
 
 interface Execution {
   id: string;
-  agent_id: string;
-  trigger_type: string;
+  agentId: string;
+  agentName?: string;
+  handlerName?: string | null;
+  triggerType: string;
   status: string;
-  input_payload: Record<string, unknown>;
+  inputPayload: Record<string, unknown>;
+  timeoutSeconds?: number;
 }
 
 interface TraceSpan {
@@ -46,9 +49,397 @@ interface TraceSpan {
   output_tokens?: number;
   cost_estimate?: number;
   latency_ms?: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface HeartbeatResponse {
+  cancelled_execution_ids?: string[];
+}
+
+export type AgentHubDedupPolicy = 'skip_if_running' | 'skip_if_exists' | 'allow_duplicate';
+export type AgentHubArchiveFilter = 'active' | 'include' | 'only';
+
+export interface AgentHubControlConfig {
+  serverUrl: string;
+  apiKey?: string;
+  dashboardUsername?: string;
+  dashboardPassword?: string;
+}
+
+export interface AgentHubCreateProjectInput {
+  name: string;
+  displayName?: string;
+  description?: string;
+  apiKey?: string;
+}
+
+export interface AgentHubProjectRecord {
+  id: string;
+  name: string;
+  displayName?: string | null;
+  description?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type AgentHubEnsureProjectResult =
+  | { created: false; project: AgentHubProjectRecord }
+  | { created: true; project: AgentHubProjectRecord; api_key: string };
+
+export interface AgentHubListAgentsQuery {
+  project?: string;
+  type?: 'cron_task' | 'llm_agent' | string;
+  status?: string;
+  archived?: AgentHubArchiveFilter;
+}
+
+export interface AgentHubGetAgentOptions {
+  includeArchived?: boolean;
+}
+
+export interface AgentHubSchedulerStatusQuery {
+  project?: string;
+  agent_id?: string;
+}
+
+export interface AgentHubListExecutorsQuery {
+  project?: string;
+}
+
+export interface AgentHubListAlertsQuery {
+  limit?: number;
+  includeAcknowledged?: boolean;
+}
+
+export interface AgentHubAcknowledgeAlertOptions {
+  acknowledgedBy?: string;
+}
+
+export interface AgentHubListExecutionsQuery {
+  agent_id?: string;
+  status?: string;
+  trigger_type?: string;
+  since?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AgentHubTriggerOptions {
+  payload?: Record<string, unknown>;
+  idempotencyKey?: string;
+  dedupPolicy?: AgentHubDedupPolicy;
+}
+
+export interface AgentHubSchedulePreviewOptions {
+  limit?: number;
+}
+
+export interface AgentHubDrainAgentOptions {
+  cancelRunning?: boolean;
+}
+
+export interface AgentHubDrainAgentResult {
+  ok: true;
+  agent_id: string;
+  cancelled_queued: number;
+  cancelled_running: number;
+  active_execution_count: number;
+}
+
+export type AgentHubAgentType = 'cron_task' | 'llm_agent';
+export type AgentHubMisfirePolicy = 'fire_once' | 'fire_all' | 'drop';
+
+export interface AgentHubCreateAgentInput {
+  projectId?: string;
+  name: string;
+  displayName: string;
+  agentType?: AgentHubAgentType;
+  cronExpression?: string | null;
+  handlerName?: string | null;
+  enabled?: boolean;
+  misfirePolicy?: AgentHubMisfirePolicy;
+  concurrency?: number;
+  maxPendingQueue?: number;
+  timeoutSeconds?: number;
+  retryMax?: number;
+  retryBackoffBaseMs?: number;
+  maxTurns?: number | null;
+  maxCostUsd?: number | null;
+  inputSchema?: Record<string, unknown> | null;
+  allowTriggerBy?: Record<string, unknown> | null;
+  idempotencyWindowSeconds?: number;
+  labels?: Record<string, string>;
+}
+
+export interface AgentHubUpdateAgentInput {
+  displayName?: string;
+  description?: string | null;
+  cronExpression?: string | null;
+  enabled?: boolean;
+  misfirePolicy?: AgentHubMisfirePolicy;
+  concurrency?: number;
+  maxPendingQueue?: number;
+  timeoutSeconds?: number;
+  retryMax?: number;
+  retryBackoffBaseMs?: number;
+  maxTurns?: number | null;
+  maxCostUsd?: number | null;
+  handlerName?: string | null;
+  executorHost?: string | null;
+  executorStatus?: 'online' | 'offline';
+  inputSchema?: Record<string, unknown> | null;
+  allowTriggerBy?: Record<string, unknown> | null;
+  idempotencyWindowSeconds?: number;
+  labels?: Record<string, string>;
+}
+
+type QueryValue = string | number | boolean | null | undefined;
+type AuthMode = 'none' | 'dashboard' | 'apiKey';
+
+export class AgentHubControlClient {
+  private config: Required<Pick<AgentHubControlConfig, 'serverUrl'>> & Omit<AgentHubControlConfig, 'serverUrl'>;
+
+  constructor(config: AgentHubControlConfig) {
+    this.config = {
+      ...config,
+      serverUrl: config.serverUrl.replace(/\/+$/, ''),
+    };
+  }
+
+  async health(): Promise<unknown> {
+    return this.requestJson('GET', '/api/health', undefined, 'none');
+  }
+
+  async listProjects(): Promise<unknown[]> {
+    return this.requestJson('GET', '/api/projects', undefined, 'dashboard');
+  }
+
+  async createProject(input: AgentHubCreateProjectInput): Promise<unknown> {
+    return this.requestJson('POST', '/api/projects', input, 'dashboard');
+  }
+
+  async ensureProject(input: AgentHubCreateProjectInput): Promise<AgentHubEnsureProjectResult> {
+    const projects = await this.listProjects() as AgentHubProjectRecord[];
+    const existingProject = projects.find((project) => project.name === input.name);
+    if (existingProject) {
+      return {
+        created: false,
+        project: existingProject,
+      };
+    }
+
+    return {
+      created: true,
+      ...(await this.createProject(input) as { project: AgentHubProjectRecord; api_key: string }),
+    };
+  }
+
+  async rotateProjectApiKey(projectId: string): Promise<unknown> {
+    return this.requestJson(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/api-key`,
+      undefined,
+      'dashboard',
+    );
+  }
+
+  async listAgents(query: AgentHubListAgentsQuery = {}): Promise<unknown[]> {
+    return this.requestJson('GET', this.pathWithQuery('/api/agents', query), undefined, 'dashboard');
+  }
+
+  async getAgent(id: string, options: AgentHubGetAgentOptions = {}): Promise<unknown> {
+    return this.requestJson(
+      'GET',
+      this.pathWithQuery(`/api/agents/${encodeURIComponent(id)}`, {
+        include_archived: options.includeArchived === true ? true : undefined,
+      }),
+      undefined,
+      'dashboard',
+    );
+  }
+
+  async getSchedulerStatus(query: AgentHubSchedulerStatusQuery = {}): Promise<unknown> {
+    return this.requestJson('GET', this.pathWithQuery('/api/scheduler/status', query), undefined, 'dashboard');
+  }
+
+  async listExecutors(query: AgentHubListExecutorsQuery = {}): Promise<unknown[]> {
+    return this.requestJson('GET', this.pathWithQuery('/api/executors', query), undefined, 'dashboard');
+  }
+
+  async listAlerts(query: AgentHubListAlertsQuery = {}): Promise<unknown[]> {
+    return this.requestJson(
+      'GET',
+      this.pathWithQuery('/api/alerts', {
+        limit: query.limit,
+        include_acknowledged: query.includeAcknowledged,
+      }),
+      undefined,
+      'dashboard',
+    );
+  }
+
+  async acknowledgeAlert(alertId: number, options: AgentHubAcknowledgeAlertOptions = {}): Promise<unknown> {
+    return this.requestJson(
+      'POST',
+      `/api/alerts/${encodeURIComponent(String(alertId))}/acknowledge`,
+      {
+        acknowledgedBy: options.acknowledgedBy,
+      },
+      'dashboard',
+    );
+  }
+
+  async createAgent(input: AgentHubCreateAgentInput): Promise<unknown> {
+    return this.requestJson('POST', '/api/agents', input, 'dashboard');
+  }
+
+  async updateAgent(agentId: string, patch: AgentHubUpdateAgentInput): Promise<unknown> {
+    return this.requestJson('PATCH', `/api/agents/${encodeURIComponent(agentId)}`, patch, 'dashboard');
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    await this.requestJson('DELETE', `/api/agents/${encodeURIComponent(agentId)}`, undefined, 'dashboard');
+  }
+
+  async drainAgent(
+    agentId: string,
+    options: AgentHubDrainAgentOptions = {},
+  ): Promise<AgentHubDrainAgentResult> {
+    return this.requestJson('POST', `/api/agents/${encodeURIComponent(agentId)}/drain`, {
+      cancel_running: options.cancelRunning === true,
+    }, 'dashboard');
+  }
+
+  async getAgentSchedulePreview(agentId: string, options: AgentHubSchedulePreviewOptions = {}): Promise<unknown> {
+    return this.requestJson(
+      'GET',
+      this.pathWithQuery(`/api/agents/${encodeURIComponent(agentId)}/schedule-preview`, options),
+      undefined,
+      'dashboard',
+    );
+  }
+
+  async setAgentEnabled(agentId: string, enabled: boolean): Promise<unknown> {
+    return this.updateAgent(agentId, { enabled });
+  }
+
+  async listExecutions(query: AgentHubListExecutionsQuery = {}): Promise<unknown[]> {
+    return this.requestJson('GET', this.pathWithQuery('/api/executions', query), undefined, 'dashboard');
+  }
+
+  async getExecution(id: string): Promise<unknown> {
+    return this.requestJson('GET', `/api/executions/${encodeURIComponent(id)}`, undefined, 'dashboard');
+  }
+
+  async getExecutionTraces(executionId: string): Promise<unknown[]> {
+    return this.requestJson('GET', `/api/executions/${encodeURIComponent(executionId)}/traces`, undefined, 'dashboard');
+  }
+
+  async triggerAgent(agentName: string, options: AgentHubTriggerOptions = {}): Promise<unknown> {
+    return this.requestJson(
+      'POST',
+      `/api/agents/${encodeURIComponent(agentName)}/trigger`,
+      {
+        payload: options.payload ?? {},
+        idempotency_key: options.idempotencyKey,
+        dedup_policy: options.dedupPolicy ?? 'skip_if_running',
+      },
+      'apiKey',
+      { 'X-Trigger-Source': 'cli' },
+    );
+  }
+
+  async cancelExecution(executionId: string): Promise<unknown> {
+    return this.requestJson('POST', `/api/executions/${encodeURIComponent(executionId)}/cancel`, undefined, 'dashboard');
+  }
+
+  async rerunExecution(executionId: string): Promise<unknown> {
+    return this.requestJson('POST', `/api/executions/${encodeURIComponent(executionId)}/rerun`, undefined, 'dashboard');
+  }
+
+  private pathWithQuery(path: string, query: object): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query) as Array<[string, QueryValue]>) {
+      if (value === undefined || value === null || value === '') continue;
+      params.set(key, String(value));
+    }
+    const search = params.toString();
+    return search ? `${path}?${search}` : path;
+  }
+
+  private async requestJson<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    auth: AuthMode = 'dashboard',
+    extraHeaders: Record<string, string> = {},
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Agent-Hub-Version': '1',
+      ...extraHeaders,
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (auth === 'dashboard') {
+      headers.Authorization = this.dashboardAuthorization();
+    } else if (auth === 'apiKey') {
+      headers.Authorization = `Bearer ${this.apiKey()}`;
+    }
+
+    const response = await fetch(`${this.config.serverUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const message = await this.errorMessage(response);
+      throw new Error(`Agent Hub ${method} ${path} failed with HTTP ${response.status}: ${message}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return response.json() as Promise<T>;
+  }
+
+  private dashboardAuthorization(): string {
+    const username = this.config.dashboardUsername ?? 'admin';
+    const password = this.config.dashboardPassword ?? 'admin';
+    return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+  }
+
+  private apiKey(): string {
+    const apiKey = this.config.apiKey ?? 'agent_hub_dev_key';
+    if (!apiKey) {
+      throw new Error('Agent Hub API key is required for write operations');
+    }
+    return apiKey;
+  }
+
+  private async errorMessage(response: Response): Promise<string> {
+    const text = await response.text();
+    if (!text) return response.statusText || 'request failed';
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const message = parsed.error ?? parsed.message;
+      return typeof message === 'string' ? message : text;
+    } catch {
+      return text;
+    }
+  }
 }
 
 export type HandlerFn = (ctx: ExecutionContext) => Promise<Record<string, unknown>>;
+
+class AgentHubExecutionCancelledError extends Error {
+  constructor(executionId: string) {
+    super(`Agent Hub execution ${executionId} was cancelled`);
+    this.name = 'AgentHubExecutionCancelledError';
+  }
+}
 
 export class AgentHubClient {
   private config: AgentHubConfig;
@@ -56,7 +447,10 @@ export class AgentHubClient {
   private agents: AgentSpec[] = [];
   private traceBuffer: TraceSpan[] = [];
   private currentExecutionId: string | null = null;
+  private currentExecutionAbortController: AbortController | null = null;
+  private currentExecutionCancelled = false;
   private running = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: AgentHubConfig) {
     this.config = config;
@@ -77,11 +471,49 @@ export class AgentHubClient {
     this.running = true;
     await this.registerAll();
     this.startHeartbeat();
-    await this.pollLoop();
+    while (this.running) {
+      try {
+        await this.runOnce();
+      } catch (err) {
+        // Network error — back off and retry
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  async syncRegistry(): Promise<unknown[]> {
+    const registered = [];
+    for (const agent of this.agents) {
+      const res = await this.fetch('PUT', `/api/registry/agents`, agent);
+      if (!res.ok) {
+        throw new Error(`Failed to register ${agent.name}: HTTP ${res.status}`);
+      }
+      registered.push(await res.json());
+    }
+    return registered;
   }
 
   stop() {
     this.running = false;
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  async runOnce(): Promise<boolean> {
+    const names = this.agents.map((agent) => agent.name).join(',');
+    if (!names) return false;
+
+    const res = await this.fetch('GET', `/api/executors/poll?agent_names=${encodeURIComponent(names)}`);
+    if (res.status === 204) return false;
+    if (!res.ok) {
+      throw new Error(`Agent Hub poll failed with HTTP ${res.status}`);
+    }
+
+    const exec: Execution = await res.json();
+    await this.execute(exec);
+    return true;
   }
 
   private pickUrl(): string {
@@ -99,62 +531,158 @@ export class AgentHubClient {
   }
 
   private startHeartbeat() {
-    setInterval(async () => {
+    if (this.heartbeatTimer !== null) return;
+    const heartbeat = async () => {
       try {
-        await this.fetch('POST', '/api/executors/heartbeat', {});
+        const body: {
+          agent_names: string[];
+          executions?: Array<{ execution_id: string }>;
+        } = {
+          agent_names: this.agents.map((agent) => agent.name),
+        };
+        if (this.currentExecutionId) {
+          body.executions = [{ execution_id: this.currentExecutionId }];
+        }
+        const response = await this.fetch('POST', '/api/executors/heartbeat', body);
+        await this.handleHeartbeatResponse(response);
       } catch {} // silently skip on network error
-    }, 10_000);
+    };
+    void heartbeat();
+    this.heartbeatTimer = setInterval(heartbeat, 10_000);
   }
 
-  private async pollLoop() {
-    while (this.running) {
-      try {
-        const res = await this.fetch('GET', '/api/executors/poll');
-        if (res.status === 204) { continue; }
+  async reportProgress(executionId: string, percent: number, message?: string) {
+    const progressPercent = Math.max(0, Math.min(100, Math.trunc(percent)));
+    const executionProgress: {
+      execution_id: string;
+      progress_percent: number;
+      progress_message?: string;
+    } = {
+      execution_id: executionId,
+      progress_percent: progressPercent,
+    };
+    if (message !== undefined) {
+      executionProgress.progress_message = message;
+    }
 
-        const exec: Execution = await res.json();
-        this.currentExecutionId = exec.id;
-        this.traceBuffer = [];
+    const res = await this.fetch('POST', '/api/executors/heartbeat', {
+      agent_names: this.agents.map((agent) => agent.name),
+      executions: [executionProgress],
+    });
+    if (!res.ok) {
+      throw new Error(`Agent Hub progress failed with HTTP ${res.status}`);
+    }
+    await this.handleHeartbeatResponse(res);
+    this.throwIfExecutionCancelled(executionId);
+  }
 
-        const agent = this.agents.find(a => a.handler && this.handlers.has(a.handler));
-        let handler: HandlerFn | undefined;
-        if (agent) {
-          handler = this.handlers.get(agent.handler);
-        }
+  recordTrace(span: Omit<TraceSpan, 'turn_index' | 'span_index'> & { turn_index?: number; span_index?: number }) {
+    this.traceBuffer.push({
+      ...span,
+      turn_index: span.turn_index ?? 0,
+      span_index: span.span_index ?? this.traceBuffer.length,
+    });
+  }
 
-        let result: { status: string; result_summary?: string; result_data?: unknown; error_message?: string; error_stack?: string; trace_count_expected?: number };
-
-        if (handler) {
-          try {
-            const ctx = new ExecutionContext(this, exec);
-            const data = await handler(ctx);
-            result = { status: 'success', result_data: data, trace_count_expected: this.traceBuffer.length };
-          } catch (err: any) {
-            result = { status: 'failed', error_message: err.message, error_stack: err.stack, trace_count_expected: this.traceBuffer.length };
-          }
-        } else {
-          result = { status: 'failed', error_message: `No handler for agent`, trace_count_expected: 0 };
-        }
-
-        // Flush remaining traces
-        await this.flushTraces();
-
-        // Report
-        await this.fetch('POST', `/api/executions/${exec.id}/report`, result);
-      } catch (err) {
-        // Network error — back off and retry
-        await new Promise(r => setTimeout(r, 1000));
+  private async execute(exec: Execution) {
+    this.currentExecutionId = exec.id;
+    this.currentExecutionCancelled = false;
+    const abortController = new AbortController();
+    this.currentExecutionAbortController = abortController;
+    this.traceBuffer = [];
+    const timeoutMs = Math.max(1, exec.timeoutSeconds ?? 600) * 1000;
+    const timeoutTimer = setTimeout(() => {
+      if (!abortController.signal.aborted) {
+        abortController.abort(new Error('Agent Hub execution timed out'));
       }
+    }, timeoutMs);
+
+    try {
+      const agent = this.agents.find(a =>
+        a.name === exec.agentName ||
+        a.handler === exec.handlerName
+      );
+      const handler = agent
+        ? this.handlers.get(agent.handler) ?? this.handlers.get(agent.name)
+        : undefined;
+
+      let result: {
+        status: string;
+        result_summary?: string;
+        result_data?: unknown;
+        error_message?: string;
+        error_stack?: string;
+        trace_count_expected?: number;
+      };
+
+      if (handler) {
+        try {
+          const ctx = new ExecutionContext(this, exec, abortController.signal);
+          const data = await handler(ctx);
+          if (this.currentExecutionCancelled) {
+            await this.flushTraces();
+            return;
+          }
+          result = { status: 'success', result_data: data, trace_count_expected: this.traceBuffer.length };
+        } catch (err: any) {
+          if (this.currentExecutionCancelled) {
+            await this.flushTraces();
+            return;
+          }
+          result = { status: 'failed', error_message: err.message, error_stack: err.stack, trace_count_expected: this.traceBuffer.length };
+        }
+      } else {
+        result = { status: 'failed', error_message: `No handler for agent`, trace_count_expected: 0 };
+      }
+
+      if (this.currentExecutionCancelled) {
+        await this.flushTraces();
+        return;
+      }
+      await this.flushTraces();
+      const report = await this.fetch('POST', `/api/executions/${exec.id}/report`, result);
+      if (!report.ok) {
+        throw new Error(`Agent Hub report failed with HTTP ${report.status}`);
+      }
+    } finally {
+      clearTimeout(timeoutTimer);
+      this.currentExecutionId = null;
+      this.currentExecutionAbortController = null;
+      this.currentExecutionCancelled = false;
     }
   }
 
-  async fetch(method: string, path: string, body?: unknown): Promise<Response> {
+  private async handleHeartbeatResponse(response: Response) {
+    if (!response.ok || response.status === 204) return;
+    const body = await response.clone().json().catch(() => null) as HeartbeatResponse | null;
+    for (const executionId of body?.cancelled_execution_ids ?? []) {
+      this.markExecutionCancelled(executionId);
+    }
+  }
+
+  private markExecutionCancelled(executionId: string) {
+    if (this.currentExecutionId !== executionId) return;
+    this.currentExecutionCancelled = true;
+    if (!this.currentExecutionAbortController?.signal.aborted) {
+      this.currentExecutionAbortController?.abort(new AgentHubExecutionCancelledError(executionId));
+    }
+  }
+
+  private throwIfExecutionCancelled(executionId: string) {
+    if (this.currentExecutionId !== executionId || !this.currentExecutionCancelled) return;
+    const reason = this.currentExecutionAbortController?.signal.reason;
+    if (reason instanceof Error) throw reason;
+    throw new AgentHubExecutionCancelledError(executionId);
+  }
+
+  async fetch(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<Response> {
     const url = this.pickUrl() + path;
     const opts: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
         'Agent-Hub-Version': '1',
+        ...extraHeaders,
       },
     };
     if (this.config.apiKey) {
@@ -179,22 +707,27 @@ export class ExecutionContext {
   private exec: Execution;
   signal: AbortSignal;
 
-  constructor(client: AgentHubClient, exec: Execution) {
+  constructor(client: AgentHubClient, exec: Execution, signal: AbortSignal) {
     this.client = client;
     this.exec = exec;
-    this.signal = AbortSignal.timeout(600_000); // default 10 min timeout
+    this.signal = signal;
   }
 
   get payload(): Record<string, unknown> {
-    return this.exec.input_payload ?? {};
+    return this.exec.inputPayload ?? {};
   }
 
   async log(message: string) {
     console.log(`[${this.exec.id}] ${message}`);
+    this.client.recordTrace({
+      role: 'tool',
+      span_type: 'log',
+      output_content: message,
+    });
   }
 
-  async progress(_percent: number, _message?: string) {
-    // Heartbeat already sends liveness; progress is informational
+  async progress(percent: number, message?: string) {
+    await this.client.reportProgress(this.exec.id, percent, message);
   }
 
   async trigger(agentName: string, opts: {
@@ -202,11 +735,16 @@ export class ExecutionContext {
     idempotencyKey?: string;
     dedupPolicy?: 'skip_if_running' | 'skip_if_exists' | 'allow_duplicate';
   }) {
-    const res = await this.client.fetch('POST', `/api/agents/${agentName}/trigger`, {
-      payload: opts.payload ?? {},
-      idempotency_key: opts.idempotencyKey,
-      dedup_policy: opts.dedupPolicy ?? 'skip_if_running',
-    });
+    const res = await this.client.fetch(
+      'POST',
+      `/api/agents/${agentName}/trigger`,
+      {
+        payload: opts.payload ?? {},
+        idempotency_key: opts.idempotencyKey,
+        dedup_policy: opts.dedupPolicy ?? 'skip_if_running',
+      },
+      { 'X-Execution-ID': this.exec.id },
+    );
     return res.json();
   }
 
@@ -228,7 +766,7 @@ export class ExecutionContext {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: req.model, messages: req.messages }),
-        signal: req.signal,
+        signal: req.signal ?? this.signal,
       });
       const data = await response.json() as any;
       const content = data.choices?.[0]?.message?.content ?? '';
@@ -245,27 +783,69 @@ export class ExecutionContext {
         output_tokens: data.usage?.completion_tokens,
         latency_ms: Date.now() - start,
       };
-      (this.client as any).traceBuffer.push(span);
+      this.client.recordTrace(span);
 
       return { content };
     },
   };
 
   trace = {
-    startSpan: (_name: string) => ({
-      setOutput: (_data: unknown) => {},
-      end: () => {},
-      error: (_err: Error) => {},
-    }),
+    startSpan: (name: string) => {
+      const startedAt = Date.now();
+      let output: unknown;
+      let ended = false;
+      const finish = (status: 'success' | 'error', error?: Error) => {
+        if (ended) return;
+        ended = true;
+        const span: Omit<TraceSpan, 'turn_index' | 'span_index'> = {
+          role: 'tool',
+          span_type: status === 'error' ? 'error' : 'custom',
+          input_content: name,
+          latency_ms: Date.now() - startedAt,
+          metadata: {
+            name,
+            status,
+          },
+        };
+        if (error) {
+          span.output_content = error.message;
+          span.metadata = {
+            ...span.metadata,
+            error_message: error.message,
+            error_stack: error.stack,
+          };
+        } else if (output !== undefined) {
+          span.output_content = this.serializeTraceContent(output);
+        }
+        this.client.recordTrace(span);
+      };
+
+      return {
+        setOutput: (data: unknown) => {
+          output = data;
+        },
+        end: () => finish('success'),
+        error: (err: Error) => finish('error', err),
+      };
+    },
   };
+
+  private serializeTraceContent(data: unknown): string {
+    if (typeof data === 'string') return data;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return String(data);
+    }
+  }
 
   cooldowns = {
     get: async (key: string) => {
-      const res = await (this.client as any).fetch('GET', `/api/cooldowns/${this.exec.agent_id}/${key}`);
+      const res = await (this.client as any).fetch('GET', `/api/cooldowns/${this.exec.agentName ?? this.exec.agentId}/${key}`);
       return res.json();
     },
     set: async (key: string) => {
-      await (this.client as any).fetch('PUT', `/api/cooldowns/${this.exec.agent_id}/${key}`, { last_run_at: new Date().toISOString() });
+      await (this.client as any).fetch('PUT', `/api/cooldowns/${this.exec.agentName ?? this.exec.agentId}/${key}`, { last_run_at: new Date().toISOString() });
     },
   };
 }

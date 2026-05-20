@@ -1,0 +1,475 @@
+import { describe, expect, test, vi } from "vitest";
+import { createAgentHubMcpTools } from "./mcp-tools";
+
+describe("Agent Hub MCP tools", () => {
+  test("exposes a compact agent control-plane tool set", () => {
+    const tools = createAgentHubMcpTools({} as any);
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "agent_hub_health",
+      "agent_hub_list_projects",
+      "agent_hub_ensure_project",
+      "agent_hub_create_project",
+      "agent_hub_rotate_project_api_key",
+      "agent_hub_get_scheduler_status",
+      "agent_hub_list_executors",
+      "agent_hub_list_alerts",
+      "agent_hub_acknowledge_alert",
+      "agent_hub_list_agents",
+      "agent_hub_get_agent",
+      "agent_hub_create_agent",
+      "agent_hub_update_agent",
+      "agent_hub_preview_agent_schedule",
+      "agent_hub_delete_agent",
+      "agent_hub_drain_agent",
+      "agent_hub_list_executions",
+      "agent_hub_get_execution",
+      "agent_hub_list_traces",
+      "agent_hub_trigger_agent",
+      "agent_hub_set_agent_enabled",
+      "agent_hub_cancel_execution",
+      "agent_hub_rerun_execution",
+    ]);
+  });
+
+  test("project list tool reads sanitized project records", async () => {
+    const listProjects = vi.fn(async () => ([
+      { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+    ]));
+    const tools = createAgentHubMcpTools({ listProjects } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_list_projects")?.handler({})).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+          ], null, 2),
+        },
+      ],
+    });
+    expect(listProjects).toHaveBeenCalledWith();
+  });
+
+  test("project ensure tool returns existing projects or creates missing projects", async () => {
+    const ensureProject = vi.fn(async () => ({
+      created: false,
+      project: { id: "project-1", name: "oph" },
+    }));
+    const tools = createAgentHubMcpTools({ ensureProject } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_ensure_project")?.handler({
+      name: "oph",
+      displayName: "Open Source Project Hunter",
+      description: "OPH executor integration",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            created: false,
+            project: { id: "project-1", name: "oph" },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(ensureProject).toHaveBeenCalledWith({
+      name: "oph",
+      displayName: "Open Source Project Hunter",
+      description: "OPH executor integration",
+    });
+  });
+
+  test("project tools create project keys and rotate existing project keys", async () => {
+    const createProject = vi.fn(async () => ({
+      project: { id: "project-1", name: "oph" },
+      api_key: "agh_created",
+    }));
+    const rotateProjectApiKey = vi.fn(async () => ({
+      project: { id: "project-1", name: "oph" },
+      api_key: "agh_rotated",
+    }));
+    const tools = createAgentHubMcpTools({ createProject, rotateProjectApiKey } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_create_project")?.handler({
+      name: "oph",
+      displayName: "Open Source Project Hunter",
+      description: "OPH executor integration",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            project: { id: "project-1", name: "oph" },
+            api_key: "agh_created",
+          }, null, 2),
+        },
+      ],
+    });
+    await expect(tools.find((tool) => tool.name === "agent_hub_rotate_project_api_key")?.handler({
+      projectId: "project-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            project: { id: "project-1", name: "oph" },
+            api_key: "agh_rotated",
+          }, null, 2),
+        },
+      ],
+    });
+
+    expect(createProject).toHaveBeenCalledWith({
+      name: "oph",
+      displayName: "Open Source Project Hunter",
+      description: "OPH executor integration",
+    });
+    expect(rotateProjectApiKey).toHaveBeenCalledWith("project-1");
+  });
+
+  test("scheduler status tool forwards filter options", async () => {
+    const getSchedulerStatus = vi.fn(async () => ({
+      generatedAt: "2026-05-20T10:00:00.000Z",
+      agents: [{ id: "agent-1", dispatchState: "dispatchable" }],
+    }));
+    const tools = createAgentHubMcpTools({ getSchedulerStatus } as any);
+    const schedulerTool = tools.find((tool) => tool.name === "agent_hub_get_scheduler_status");
+
+    await expect(schedulerTool?.handler({
+      agentId: "agent-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            generatedAt: "2026-05-20T10:00:00.000Z",
+            agents: [{ id: "agent-1", dispatchState: "dispatchable" }],
+          }, null, 2),
+        },
+      ],
+    });
+    expect(getSchedulerStatus).toHaveBeenCalledWith({ agent_id: "agent-1" });
+  });
+
+  test("executor and alert tools forward operator options", async () => {
+    const listExecutors = vi.fn(async () => ([
+      { agent_name: "oph_deep_research", executor_status: "online" },
+    ]));
+    const listAlerts = vi.fn(async () => ([
+      { id: 7, ruleName: "failed_runs" },
+    ]));
+    const acknowledgeAlert = vi.fn(async () => ({
+      id: 7,
+      acknowledgedBy: "agent",
+    }));
+    const tools = createAgentHubMcpTools({ listExecutors, listAlerts, acknowledgeAlert } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_list_executors")?.handler({
+      project: "project-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            { agent_name: "oph_deep_research", executor_status: "online" },
+          ], null, 2),
+        },
+      ],
+    });
+    await expect(tools.find((tool) => tool.name === "agent_hub_list_alerts")?.handler({
+      limit: 5,
+      includeAcknowledged: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            { id: 7, ruleName: "failed_runs" },
+          ], null, 2),
+        },
+      ],
+    });
+    await expect(tools.find((tool) => tool.name === "agent_hub_acknowledge_alert")?.handler({
+      alertId: 7,
+      acknowledgedBy: "agent",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            id: 7,
+            acknowledgedBy: "agent",
+          }, null, 2),
+        },
+      ],
+    });
+
+    expect(listExecutors).toHaveBeenCalledWith({ project: "project-1" });
+    expect(listAlerts).toHaveBeenCalledWith({ limit: 5, includeAcknowledged: true });
+    expect(acknowledgeAlert).toHaveBeenCalledWith(7, { acknowledgedBy: "agent" });
+  });
+
+  test("list agents tool forwards the archived filter", async () => {
+    const listAgents = vi.fn(async () => ([
+      { id: "agent-1", name: "archived_agent", archivedAt: "2026-05-20T10:00:00.000Z" },
+    ]));
+    const tools = createAgentHubMcpTools({ listAgents } as any);
+    const listTool = tools.find((tool) => tool.name === "agent_hub_list_agents");
+
+    await expect(listTool?.handler({
+      archived: "only",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            { id: "agent-1", name: "archived_agent", archivedAt: "2026-05-20T10:00:00.000Z" },
+          ], null, 2),
+        },
+      ],
+    });
+    expect(listAgents).toHaveBeenCalledWith({ archived: "only" });
+  });
+
+  test("get agent tool can include archived detail records", async () => {
+    const getAgent = vi.fn(async () => ({
+      id: "agent-1",
+      archivedAt: "2026-05-20T10:00:00.000Z",
+      recentExecutions: [{ id: "exec-1", status: "success" }],
+    }));
+    const tools = createAgentHubMcpTools({ getAgent } as any);
+    const getTool = tools.find((tool) => tool.name === "agent_hub_get_agent");
+
+    await expect(getTool?.handler({
+      agentId: "agent-1",
+      includeArchived: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            id: "agent-1",
+            archivedAt: "2026-05-20T10:00:00.000Z",
+            recentExecutions: [{ id: "exec-1", status: "success" }],
+          }, null, 2),
+        },
+      ],
+    });
+    expect(getAgent).toHaveBeenCalledWith("agent-1", { includeArchived: true });
+  });
+
+  test("trigger tool forwards payload, idempotency, and dedup options", async () => {
+    const triggerAgent = vi.fn(async () => ({
+      execution_id: "exec-1",
+      status: "queued",
+      duplicate: false,
+    }));
+    const tools = createAgentHubMcpTools({ triggerAgent } as any);
+    const triggerTool = tools.find((tool) => tool.name === "agent_hub_trigger_agent");
+
+    await expect(triggerTool?.handler({
+      agentName: "demo_agent",
+      payload: { value: 42 },
+      idempotencyKey: "manual-42",
+      dedupPolicy: "skip_if_exists",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            execution_id: "exec-1",
+            status: "queued",
+            duplicate: false,
+          }, null, 2),
+        },
+      ],
+    });
+    expect(triggerAgent).toHaveBeenCalledWith("demo_agent", {
+      payload: { value: 42 },
+      idempotencyKey: "manual-42",
+      dedupPolicy: "skip_if_exists",
+    });
+  });
+
+  test("set agent enabled tool forwards the desired state", async () => {
+    const setAgentEnabled = vi.fn(async () => ({ id: "agent-1", enabled: false }));
+    const tools = createAgentHubMcpTools({ setAgentEnabled } as any);
+    const setEnabledTool = tools.find((tool) => tool.name === "agent_hub_set_agent_enabled");
+
+    await expect(setEnabledTool?.handler({
+      agentId: "agent-1",
+      enabled: false,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "agent-1", enabled: false }, null, 2),
+        },
+      ],
+    });
+    expect(setAgentEnabled).toHaveBeenCalledWith("agent-1", false);
+  });
+
+  test("create and update agent tools forward scheduler settings", async () => {
+    const createAgent = vi.fn(async () => ({ id: "agent-1", name: "demo_agent" }));
+    const updateAgent = vi.fn(async () => ({ id: "agent-1", displayName: "Renamed Agent" }));
+    const tools = createAgentHubMcpTools({ createAgent, updateAgent } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_create_agent")?.handler({
+      name: "demo_agent",
+      displayName: "Demo Agent",
+      agentType: "cron_task",
+      cronExpression: "*/15 * * * *",
+      handlerName: "demo_handler",
+      concurrency: 2,
+      timeoutSeconds: 120,
+      labels: { team: "ops" },
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "agent-1", name: "demo_agent" }, null, 2),
+        },
+      ],
+    });
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_update_agent")?.handler({
+      agentId: "agent-1",
+      displayName: "Renamed Agent",
+      cronExpression: null,
+      retryMax: 0,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "agent-1", displayName: "Renamed Agent" }, null, 2),
+        },
+      ],
+    });
+
+    expect(createAgent).toHaveBeenCalledWith({
+      name: "demo_agent",
+      displayName: "Demo Agent",
+      agentType: "cron_task",
+      cronExpression: "*/15 * * * *",
+      handlerName: "demo_handler",
+      concurrency: 2,
+      timeoutSeconds: 120,
+      labels: { team: "ops" },
+    });
+    expect(updateAgent).toHaveBeenCalledWith("agent-1", {
+      displayName: "Renamed Agent",
+      cronExpression: null,
+      retryMax: 0,
+    });
+  });
+
+  test("schedule preview tool forwards agent id and limit", async () => {
+    const getAgentSchedulePreview = vi.fn(async () => ({
+      runs: ["2026-05-20T12:00:00.000Z"],
+    }));
+    const tools = createAgentHubMcpTools({ getAgentSchedulePreview } as any);
+    const previewTool = tools.find((tool) => tool.name === "agent_hub_preview_agent_schedule");
+
+    await expect(previewTool?.handler({
+      agentId: "agent-1",
+      limit: 3,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ runs: ["2026-05-20T12:00:00.000Z"] }, null, 2),
+        },
+      ],
+    });
+    expect(getAgentSchedulePreview).toHaveBeenCalledWith("agent-1", { limit: 3 });
+  });
+
+  test("delete agent tool forwards the agent id", async () => {
+    const deleteAgent = vi.fn(async () => undefined);
+    const tools = createAgentHubMcpTools({ deleteAgent } as any);
+    const deleteTool = tools.find((tool) => tool.name === "agent_hub_delete_agent");
+
+    await expect(deleteTool?.handler({
+      agentId: "agent-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ ok: true }, null, 2),
+        },
+      ],
+    });
+    expect(deleteAgent).toHaveBeenCalledWith("agent-1");
+  });
+
+  test("drain agent tool forwards cancellation options", async () => {
+    const drainAgent = vi.fn(async () => ({
+      ok: true,
+      agent_id: "agent-1",
+      cancelled_queued: 1,
+      cancelled_running: 1,
+      active_execution_count: 0,
+    }));
+    const tools = createAgentHubMcpTools({ drainAgent } as any);
+    const drainTool = tools.find((tool) => tool.name === "agent_hub_drain_agent");
+
+    await expect(drainTool?.handler({
+      agentId: "agent-1",
+      cancelRunning: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            agent_id: "agent-1",
+            cancelled_queued: 1,
+            cancelled_running: 1,
+            active_execution_count: 0,
+          }, null, 2),
+        },
+      ],
+    });
+    expect(drainAgent).toHaveBeenCalledWith("agent-1", { cancelRunning: true });
+  });
+
+  test("cancel and rerun tools forward execution ids", async () => {
+    const cancelExecution = vi.fn(async () => ({ ok: true, status: "cancelled" }));
+    const rerunExecution = vi.fn(async () => ({
+      execution_id: "exec-2",
+      source_execution_id: "exec-1",
+      status: "queued",
+    }));
+    const tools = createAgentHubMcpTools({ cancelExecution, rerunExecution } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_cancel_execution")?.handler({
+      executionId: "exec-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ ok: true, status: "cancelled" }, null, 2),
+        },
+      ],
+    });
+    await expect(tools.find((tool) => tool.name === "agent_hub_rerun_execution")?.handler({
+      executionId: "exec-1",
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            execution_id: "exec-2",
+            source_execution_id: "exec-1",
+            status: "queued",
+          }, null, 2),
+        },
+      ],
+    });
+
+    expect(cancelExecution).toHaveBeenCalledWith("exec-1");
+    expect(rerunExecution).toHaveBeenCalledWith("exec-1");
+  });
+});

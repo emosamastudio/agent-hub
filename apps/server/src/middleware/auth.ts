@@ -1,5 +1,29 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { serverConfig } from "../config.js";
+import { constantTimeEqual } from "../security.js";
+
+export function getBearerToken(request: FastifyRequest): string | null {
+  const auth = request.headers.authorization;
+  if (!auth || !auth.startsWith("Bearer ")) return null;
+  return auth.slice("Bearer ".length).trim() || null;
+}
+
+export function isValidDashboardBasicAuth(request: FastifyRequest): boolean {
+  const auth = request.headers.authorization;
+  if (!auth || !auth.startsWith("Basic ")) return false;
+
+  const [, credentials] = auth.split(" ");
+  if (!credentials) return false;
+
+  const decoded = Buffer.from(credentials, "base64").toString();
+  const separatorIndex = decoded.indexOf(":");
+  if (separatorIndex === -1) return false;
+
+  const username = decoded.slice(0, separatorIndex);
+  const password = decoded.slice(separatorIndex + 1);
+  return constantTimeEqual(username, serverConfig.dashboardUsername)
+    && constantTimeEqual(password, serverConfig.dashboardPassword);
+}
 
 export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
   // Skip auth for SDK endpoints (use API key instead)
@@ -22,15 +46,7 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
   }
 
   // All other dashboard API endpoints require Basic Auth
-  const auth = request.headers.authorization;
-  if (!auth || !auth.startsWith("Basic ")) {
-    reply.header("WWW-Authenticate", 'Basic realm="Agent Cron Hub"');
-    return reply.status(401).send({ error: "unauthorized" });
-  }
-
-  const [, credentials] = auth.split(" ");
-  const [user, password] = Buffer.from(credentials, "base64").toString().split(":");
-  if (password !== serverConfig.dashboardPassword) {
+  if (!isValidDashboardBasicAuth(request)) {
     return reply.status(401).send({ error: "unauthorized" });
   }
 }

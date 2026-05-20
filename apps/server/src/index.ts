@@ -16,6 +16,7 @@ async function main() {
     agentRepo: appCtx.agentRepo,
     executionRepo: appCtx.executionRepo,
     traceRepo: appCtx.traceRepo,
+    alertRepo: appCtx.alertRepo,
   });
 }
 

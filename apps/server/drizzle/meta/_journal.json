@@ -8,6 +8,41 @@
       "when": 1779132520400,
       "tag": "0000_bizarre_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779169800000,
+      "tag": "0001_scheduler_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779170000000,
+      "tag": "0002_hash_default_dashboard_password",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779214400000,
+      "tag": "0003_alert_acknowledgement",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779250200000,
+      "tag": "0004_execution_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779259000000,
+      "tag": "0005_archive_agents",
+      "breakpoints": true
     }
   ]
 }

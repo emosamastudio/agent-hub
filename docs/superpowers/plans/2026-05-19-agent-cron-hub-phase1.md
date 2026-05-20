@@ -1956,7 +1956,7 @@ export default function App() {
           <ExecutionTable executions={executions.slice(0, 10)} onSelect={(e) => {
             setSelectedExecution(e);
             setPage("detail");
-            if (e.id) fetch(`/api/executions/${e.id}/traces`, { headers: { "Authorization": "Basic " + btoa("admin:admin") } })
+            if (e.id) fetch(`/api/executions/${e.id}/traces`, { headers: { "Authorization": "Basic " + btoa("admin:<password>") } })
               .then(r => r.json()).then(setTraces);
           }} statusColor={statusColor} />
         </div>
@@ -2005,7 +2005,7 @@ export default function App() {
           <ExecutionTable executions={executions} onSelect={(e) => {
             setSelectedExecution(e);
             setPage("detail");
-            if (e.id) fetch(`/api/executions/${e.id}/traces`, { headers: { "Authorization": "Basic " + btoa("admin:admin") } })
+            if (e.id) fetch(`/api/executions/${e.id}/traces`, { headers: { "Authorization": "Basic " + btoa("admin:<password>") } })
               .then(r => r.json()).then(setTraces);
           }} statusColor={statusColor} />
         </div>
@@ -2192,11 +2192,11 @@ sleep 2
 curl http://localhost:8787/api/health
 
 # Test agent listing
-curl http://localhost:8787/api/agents -H "Authorization: Basic $(echo -n 'admin:admin' | base64)"
+curl http://localhost:8787/api/agents -H "Authorization: Basic $(echo -n 'admin:<password>' | base64)"
 
 # Test manual trigger
 curl -X POST http://localhost:8787/api/agents/demo_hello/trigger \
-  -H "Authorization: Basic $(echo -n 'admin:admin' | base64)" \
+  -H "Authorization: Basic $(echo -n 'admin:<password>' | base64)" \
   -H "Content-Type: application/json" \
   -d '{"payload": {"message": "test"}}'
 

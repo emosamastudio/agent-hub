@@ -19,6 +19,11 @@ export class ProjectRepository {
     return rows[0] ?? null;
   }
 
+  async findByApiKeyHash(apiKeyHash: string) {
+    const rows = await this.db.select().from(projects).where(eq(projects.apiKeyHash, apiKeyHash)).limit(1);
+    return rows[0] ?? null;
+  }
+
   async create(input: { name: string; displayName: string; description?: string; apiKeyHash?: string }) {
     const rows = await this.db.insert(projects).values({
       name: input.name,

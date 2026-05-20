@@ -62,9 +62,9 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
           ▲                ▲                ▲
           │ HTTP/Pull      │ HTTP/Push      │ HTTP/Pull
           │                │ (HMAC signed)  │
-    ┌─────┴─────┐    ┌─────┴─────┐    ┌─────┴─────┐
-    │ llm-wiki   │    │    OPH    │    │  future   │
-    │ (TS SDK)   │    │ (Go SDK)  │    │ projects  │
+    ┌───────────┐    ┌───────────┐    ┌───────────┐
+    │consumer-b │    │consumer-a │    │  future   │
+    │ (TS SDK)  │    │ (Go SDK)  │    │ projects  │
     └───────────┘    └───────────┘    └───────────┘
 ```
 
@@ -78,7 +78,7 @@ A centralized **agent cron service center** that schedules, dispatches, monitors
 
 **D4: SDK does the heavy instrumentation.** The SDK auto-captures LLM calls, manages heartbeats, and reports progress. Projects don't write tracing code — they call `ctx.llm.chat()` and tracing happens automatically.
 
-**D5: Agents can trigger agents.** An agent handler can call `ctx.trigger()` to fire another agent. This enables decomposition of monolithic loops like OPH's steward. Trigger chains have depth limits and idempotency keys to prevent runaway cascades.
+**D5: Agents can trigger agents.** An agent handler can call `ctx.trigger()` to fire another agent. This enables decomposition of monolithic loops like consumer-a's steward. Trigger chains have depth limits and idempotency keys to prevent runaway cascades.
 
 **D6: Progressive migration.** Old and new hubs run side-by-side during transition. Projects migrate one agent at a time. No big-bang cutover.
 
@@ -185,7 +185,7 @@ CREATE TABLE agents (
 
   -- Trigger authorization
   allow_trigger_by JSONB,   -- NULL = any agent in same project can trigger (default)
-                             -- NOT NULL = whitelist: {"projects": ["oph"], "agents": ["steward_backlog"]}
+                             -- NOT NULL = whitelist: {"projects": ["consumer-a"], "agents": ["steward_backlog"]}
                              -- {"projects": [], "agents": []} = no agent can trigger (manual/API only)
 
   -- Idempotency
@@ -217,7 +217,7 @@ CREATE INDEX idx_agents_enabled ON agents(enabled) WHERE enabled = true;
 | `cron_task` | Usually set | No | Shell scripts, data sync, API calls |
 | `llm_agent` | Usually set | **Yes** | LLM extraction, research, synthesis |
 
-Note: `agent_loop` was considered but removed. Long-running loops (like OPH steward) decompose into individual cron agents (one per check) with agent-to-agent triggering. Individual checks that currently run in a 60s tick become their own agents with natural cadences (every minute, every 30 minutes, daily). This provides better visibility and independent control. Truly continuous workloads (file watchers, message queue consumers) remain as custom processes with `trigger_type='api'`.
+Note: `agent_loop` was considered but removed. Long-running loops (like consumer-a steward) decompose into individual cron agents (one per check) with agent-to-agent triggering. Individual checks that currently run in a 60s tick become their own agents with natural cadences (every minute, every 30 minutes, daily). This provides better visibility and independent control. Truly continuous workloads (file watchers, message queue consumers) remain as custom processes with `trigger_type='api'`.
 
 #### `executions`
 
@@ -233,7 +233,7 @@ CREATE TABLE executions (
 
   -- Trigger info
   trigger_type    trigger_type NOT NULL,
-  triggered_by    TEXT,            -- 'cron', 'user:emo', 'api:oph-steward', 'agent:steward_backlog'
+  triggered_by    TEXT,            -- 'cron', 'user:emo', 'api:consumer-a-steward', 'agent:steward_backlog'
 
   -- Agent-to-agent trigger chain (Temporal child workflow pattern)
   parent_execution_id UUID REFERENCES executions(id),  -- who triggered me
@@ -614,7 +614,7 @@ import { AgentHubClient } from '@agent-hub/sdk';
 const hub = new AgentHubClient({
   serverUrl: 'http://agent-hub.internal:8787',
   // For HA: serverUrls: ['http://hub1:8787', 'http://hub2:8787'],
-  project: 'llm-wiki',
+  project: 'consumer-b',
   apiKey: process.env.AGENT_HUB_API_KEY,
 });
 
@@ -740,7 +740,7 @@ func handleDeepResearch(ctx agenthub.Context, job *agenthub.Job) error {
 func main() {
     client := agenthub.NewClient(agenthub.Config{
         ServerURL: os.Getenv("AGENT_HUB_URL"),
-        Project:   "oph",
+        Project:   "consumer-a",
         APIKey:    os.Getenv("AGENT_HUB_API_KEY"),
     })
 
@@ -777,7 +777,7 @@ import asyncio
 
 hub = AgentHubClient(
     server_url="http://agent-hub.internal:8787",
-    project="llm-wiki",
+    project="consumer-b",
     api_key=os.environ["AGENT_HUB_API_KEY"],
 )
 
@@ -1056,7 +1056,7 @@ Authorization is checked in order. A trigger is rejected at the first failing ch
 4. System agents (name prefixed '_hub_') → always rejected (409)
 ```
 
-**Key semantic:** `allow_trigger_by = NULL` means "any agent in my project." It does NOT grant cross-project access. If project `oph` wants agent `llm_extract` to be triggerable by project `external`, both conditions must be met: `llm-wiki.allow_trigger_from` includes `'oph'`, AND `llm_extract.allow_trigger_by` explicitly lists `'oph/steward_backlog'` (or `'oph'` as project-level wildcard). This prevents the case where adding a project to `allow_trigger_from` unexpectedly opens access to all its agents.
+**Key semantic:** `allow_trigger_by = NULL` means "any agent in my project." It does NOT grant cross-project access. If project `consumer-a` wants agent `llm_extract` to be triggerable by project `external`, both conditions must be met: `consumer-b.allow_trigger_from` includes `'consumer-a'`, AND `llm_extract.allow_trigger_by` explicitly lists `'consumer-a/steward_backlog'` (or `'consumer-a'` as project-level wildcard). This prevents the case where adding a project to `allow_trigger_from` unexpectedly opens access to all its agents.
 
 System agents (names prefixed `_hub_`) cannot be triggered via the external API at all.
 
@@ -1136,7 +1136,7 @@ The hub sets the following fields on the new execution:
 
 **Why check #2 matters:** A handler reports `success` at the end of its execution. If the SDK sends a stray `ctx.trigger()` call after reporting, the execution is already terminal — the trigger is rejected. This prevents post-mortem chain extensions. The 409 response tells the SDK its trigger was dropped, which is logged as a warning.
 
-**Why check #3 matters:** Without it, an attacker with a valid API key for project `malicious` could POST to `/api/agents/deep_research/trigger` with `X-Execution-ID: <some_oph_execution_id>` and make it appear as if OPH's steward triggered the deep_research. The project match check ensures the header's execution belongs to the same project as the API key.
+**Why check #3 matters:** Without it, an attacker with a valid API key for project `malicious` could POST to `/api/agents/deep_research/trigger` with `X-Execution-ID: <some_consumer_execution_id>` and make it appear as if consumer-a's steward triggered the deep_research. The project match check ensures the header's execution belongs to the same project as the API key.
 
 The chain is traversable via `GET /api/executions/:id/trigger-chain?direction=up|down|both`, implemented as a recursive CTE on `parent_execution_id`.
 
@@ -1178,7 +1178,7 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
 | React + Vite dashboard | New dashboard shell |
 | `packages/shared` contracts | Redesigned for agents/executions/traces |
 | `zod` validation patterns | API input validation |
-| `examples/reference-sidecar.mjs` | Reference for TypeScript SDK usage |
+| `scripts/demo-agent.mjs` | Reference for TypeScript SDK usage |
 | Drizzle ORM setup | Switch dialect from SQLite to PostgreSQL |
 
 ---
@@ -1194,10 +1194,10 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
 - Dashboard auth (HTTP Basic)
 - **Delivers:** Manual trigger from dashboard, zero SDK needed. Agents can be registered and triggered manually while old cron still runs.
 
-### Phase 2: Go SDK + OPH Steward Decomposition
+### Phase 2: Go SDK + consumer-a Steward Decomposition
 
 - Build `agent-hub-sdk-go` (minimal: register, poll, heartbeat, report, trigger)
-- Decompose OPH steward into independent agents:
+- Decompose consumer-a steward into independent agents:
   - `steward_backlog_prioritize` (llm_agent, `* * * * *`) — checks backlog, LLM ranks, triggers `deep_research`
   - `steward_recover_stale` (cron_task, `* * * * *`) — re-queues stuck jobs
   - `steward_cadence_reentry` (cron_task, `*/30 * * * *`) — checks due repos, triggers discovery
@@ -1215,7 +1215,7 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
   - Lint orphan dedup check
   - Discovery cross-agent dedup query
 - Migrate `deep_research`, `relationship_agent`, worker enrich stage
-- **Delivers:** All OPH agents running through hub, steward fully decomposed
+- **Delivers:** All consumer-a agents running through hub, steward fully decomposed
 
 ### Phase 3: Dashboard
 
@@ -1228,11 +1228,11 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
 - Alert history view
 - **Delivers:** Full observability over all agents and executions
 
-### Phase 4: Python SDK + llm-wiki Migration
+### Phase 4: Python SDK + consumer-b Migration
 
 - Build `agent-hub-sdk` (Python)
 - Create evaluator agent: `channel_refresh_evaluator` (replaces `runAutomationTick`)
-- Migrate llm-wiki agents one at a time:
+- Migrate consumer-b agents one at a time:
   - `refresh_source_channel` — scrape channel, discover URLs
   - `ingest_source` — fetch and capture content
   - `llm_extract` — LLM extraction (auto-chained via `ctx.trigger` after ingest)
@@ -1240,7 +1240,7 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
   - `sync_wiki` — re-index wiki pages
   - `discover_channels` — LLM-based channel discovery (manual)
 - Remove `src/worker.ts`, `requeueJobForRetry` (hub owns retry)
-- **Delivers:** All llm-wiki agents running through hub
+- **Delivers:** All consumer-b agents running through hub
 
 ### Phase 5: Production Hardening
 
@@ -1256,13 +1256,13 @@ Instead of big-bang removal, the old and new hub run side-by-side during transit
 
 ## 11. Steward Decomposition Reference
 
-This section documents the specific patterns needed to safely decompose OPH's 60s steward loop into 10 independent cron agents. These patterns are reusable for any project decomposing a monolithic scheduler loop.
+This section documents the specific patterns needed to safely decompose consumer-a's 60s steward loop into 10 independent cron agents. These patterns are reusable for any project decomposing a monolithic scheduler loop.
 
 ### 11.1 Required Infrastructure
 
 1. **DB-backed cooldowns** (`agent_cooldowns` table): Replaces volatile `time.Time` fields in the old steward struct. Each evaluator agent checks `WHERE last_run_at < now() - cooldown_duration` and upserts after completing.
 
-2. **Repo-level dedup key** on job enqueue (`dedupe_key TEXT` on the OPH job queue): `deep_analysis:{owner}/{repo}`. Before enqueuing, check `WHERE dedupe_key = $1 AND status IN ('queued','running') AND requested_at > now() - INTERVAL '6 hours'`. Prevents same-repo double-enqueue from different agents.
+2. **Repo-level dedup key** on job enqueue (`dedupe_key TEXT` on the consumer-a job queue): `deep_analysis:{owner}/{repo}`. Before enqueuing, check `WHERE dedupe_key = $1 AND status IN ('queued','running') AND requested_at > now() - INTERVAL '6 hours'`. Prevents same-repo double-enqueue from different agents.
 
 3. **LLM prioritization cooldown** (10 minutes, separate from tick interval): `steward_backlog_prioritize` only calls the LLM prioritizer when `len(candidates) > availableSlots * 3` AND at least 10 minutes since last LLM prioritization call. Otherwise uses FIFO.
 
