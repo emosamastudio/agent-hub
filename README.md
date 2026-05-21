@@ -256,10 +256,11 @@ node packages/sdk/dist/cli.js projects rotate-key <project-id>
 node packages/sdk/dist/cli.js projects drain oph --cancel-running
 node packages/sdk/dist/cli.js projects disable oph
 node packages/sdk/dist/cli.js projects enable oph
-node packages/sdk/dist/cli.js scheduler status --agent-id <agent-id>
-node packages/sdk/dist/cli.js agents list --status online
+node packages/sdk/dist/cli.js scheduler status --project oph
+node packages/sdk/dist/cli.js agents list --project oph --status online
 node packages/sdk/dist/cli.js agents list --archived only
 node packages/sdk/dist/cli.js agents get <agent-id> --include-archived
+node packages/sdk/dist/cli.js agents get deep_research --project oph
 node packages/sdk/dist/cli.js agents create demo_agent \
   --display-name "Demo Agent" \
   --description "Runs a manually managed demo task for Agent Hub validation" \
@@ -271,12 +272,12 @@ node packages/sdk/dist/cli.js agents create demo_agent \
 node packages/sdk/dist/cli.js agents update <agent-id> \
   --cron "*/15 * * * *" \
   --retry-max 1
-node packages/sdk/dist/cli.js agents schedule-preview <agent-id> --limit 5
-node packages/sdk/dist/cli.js agents disable <agent-id>
-node packages/sdk/dist/cli.js agents enable <agent-id>
-node packages/sdk/dist/cli.js agents drain <agent-id> --cancel-running
-node packages/sdk/dist/cli.js agents delete <agent-id>
-node packages/sdk/dist/cli.js executors list
+node packages/sdk/dist/cli.js agents schedule-preview deep_research --project oph --limit 5
+node packages/sdk/dist/cli.js agents disable deep_research --project oph
+node packages/sdk/dist/cli.js agents enable deep_research --project oph
+node packages/sdk/dist/cli.js agents drain relationship_agent --project oph --cancel-running
+node packages/sdk/dist/cli.js agents delete deep_research --project oph
+node packages/sdk/dist/cli.js executors list --project oph
 node packages/sdk/dist/cli.js alerts list --limit 20
 node packages/sdk/dist/cli.js alerts acknowledge <alert-id> --by agent
 node packages/sdk/dist/cli.js executions list --status queued --limit 20
@@ -297,7 +298,7 @@ node packages/sdk/dist/cli.js trigger demo_agent \
   --require-success
 ```
 
-`agents drain` disables scheduling and executor polling for an agent, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided. `agents delete` and registry deregistration refuse agents that still have queued or running executions. Cancel or drain active work before deleting an agent. Once accepted, delete/deregister archives the agent, removes it from active dashboard/API lists, disables scheduling and executor polling for it, and preserves terminal execution/trace history for audit. Use `agents list --archived only` and `agents get --include-archived` to inspect archived agents and their retained history.
+Project-scoped read commands such as `agents list`, `executors list`, and `scheduler status` accept project names or ids. Agent-level commands accept either an agent id or an agent name. When using names across multiple projects, pass `--project <name-or-id>` so the SDK resolves the active agent safely and rejects ambiguous matches. `agents drain` disables scheduling and executor polling for an agent, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided. `agents delete` and registry deregistration refuse agents that still have queued or running executions. Cancel or drain active work before deleting an agent. Once accepted, delete/deregister archives the agent, removes it from active dashboard/API lists, disables scheduling and executor polling for it, and preserves terminal execution/trace history for audit. Use `agents list --archived only` and `agents get --include-archived` to inspect archived agents and their retained history.
 
 `scheduler status` returns the control-plane scheduler snapshot for active agents, including queued/running counts, active concurrency, queue capacity, dispatch state, schedule state, cron due timestamp, and next run timestamp. Use it before debugging a worker to distinguish "nothing due", "executor offline", "queue full", and "ready to dispatch".
 
@@ -365,6 +366,8 @@ Exposed tools:
 - `agent_hub_set_agent_enabled`
 - `agent_hub_cancel_execution`
 - `agent_hub_rerun_execution`
+
+Agent MCP tools that target a single agent accept `agentId` as either an id or a name. Pass `project` when targeting by name in a multi-project hub, for example `{ "agentId": "deep_research", "project": "oph", "enabled": false }` with `agent_hub_set_agent_enabled`.
 
 ## Development checks
 

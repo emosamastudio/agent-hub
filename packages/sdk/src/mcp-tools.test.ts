@@ -455,7 +455,8 @@ describe("Agent Hub MCP tools", () => {
     const setEnabledTool = tools.find((tool) => tool.name === "agent_hub_set_agent_enabled");
 
     await expect(setEnabledTool?.handler({
-      agentId: "agent-1",
+      agentId: "deep_research",
+      project: "oph",
       enabled: false,
     })).resolves.toEqual({
       content: [
@@ -465,7 +466,7 @@ describe("Agent Hub MCP tools", () => {
         },
       ],
     });
-    expect(setAgentEnabled).toHaveBeenCalledWith("agent-1", false);
+    expect(setAgentEnabled).toHaveBeenCalledWith("deep_research", false, { project: "oph" });
   });
 
   test("create and update agent tools forward scheduler settings", async () => {
@@ -575,7 +576,8 @@ describe("Agent Hub MCP tools", () => {
     const drainTool = tools.find((tool) => tool.name === "agent_hub_drain_agent");
 
     await expect(drainTool?.handler({
-      agentId: "agent-1",
+      agentId: "relationship_agent",
+      project: "oph",
       cancelRunning: true,
     })).resolves.toEqual({
       content: [
@@ -591,7 +593,7 @@ describe("Agent Hub MCP tools", () => {
         },
       ],
     });
-    expect(drainAgent).toHaveBeenCalledWith("agent-1", { cancelRunning: true });
+    expect(drainAgent).toHaveBeenCalledWith("relationship_agent", { cancelRunning: true, project: "oph" });
   });
 
   test("wait execution tool forwards polling options", async () => {

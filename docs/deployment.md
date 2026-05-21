@@ -156,8 +156,9 @@ After OPH registers its executor agents:
 ```bash
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js metrics
-node packages/sdk/dist/cli.js scheduler status
-node packages/sdk/dist/cli.js agents list
+node packages/sdk/dist/cli.js scheduler status --project oph
+node packages/sdk/dist/cli.js agents list --project oph
+node packages/sdk/dist/cli.js agents get enrich_repo --project oph
 node packages/sdk/dist/cli.js trigger enrich_repo \
   --payload '{"repo_name":"agent-hub-smoke"}' \
   --dedup-policy allow_duplicate \

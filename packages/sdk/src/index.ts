@@ -94,7 +94,11 @@ export interface AgentHubListAgentsQuery {
   archived?: AgentHubArchiveFilter;
 }
 
-export interface AgentHubGetAgentOptions {
+export interface AgentHubAgentTargetOptions {
+  project?: string;
+}
+
+export interface AgentHubGetAgentOptions extends AgentHubAgentTargetOptions {
   includeArchived?: boolean;
 }
 
@@ -138,11 +142,11 @@ export interface AgentHubTriggerResult {
   [key: string]: unknown;
 }
 
-export interface AgentHubSchedulePreviewOptions {
+export interface AgentHubSchedulePreviewOptions extends AgentHubAgentTargetOptions {
   limit?: number;
 }
 
-export interface AgentHubDrainAgentOptions {
+export interface AgentHubDrainAgentOptions extends AgentHubAgentTargetOptions {
   cancelRunning?: boolean;
 }
 
@@ -254,6 +258,12 @@ export interface AgentHubSetProjectEnabledResult {
   count: number;
 }
 
+interface AgentHubAgentRecord {
+  id: string;
+  name?: string;
+  projectId?: string;
+}
+
 export type AgentHubAgentType = 'cron_task' | 'llm_agent';
 export type AgentHubMisfirePolicy = 'fire_once' | 'fire_all' | 'drop';
 
@@ -327,6 +337,10 @@ function recordStatus(record: unknown): string | null {
 
 function projectRecordMatches(record: AgentHubProjectRecord, project: string): boolean {
   return record.id === project || record.name === project;
+}
+
+function looksLikeDirectAgentId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function errorMessage(error: unknown): string {
@@ -434,7 +448,7 @@ export class AgentHubControlClient {
     const projectId = report.project?.found ? report.project.id : undefined;
     if (!options.project || projectId) {
       report.agents = await this.captureDoctorStep("agents", checks, async () => {
-        const agents = await this.listAgents(projectId ? { project: projectId } : {});
+        const agents = await this.listAgentsByProjectId(projectId ? { project: projectId } : {});
         return {
           value: agents,
           check: {
@@ -446,7 +460,7 @@ export class AgentHubControlClient {
       });
 
       report.executors = await this.captureDoctorStep("executors", checks, async () => {
-        const executors = await this.listExecutors(projectId ? { project: projectId } : {});
+        const executors = await this.listExecutorsByProjectId(projectId ? { project: projectId } : {});
         const agentCount = report.agents?.length ?? 0;
         return {
           value: executors,
@@ -527,11 +541,7 @@ export class AgentHubControlClient {
   }
 
   async setProjectEnabled(project: string, enabled: boolean): Promise<AgentHubSetProjectEnabledResult> {
-    const projects = await this.listProjects() as AgentHubProjectRecord[];
-    const targetProject = projects.find((candidate) => projectRecordMatches(candidate, project));
-    if (!targetProject) {
-      throw new Error(`Agent Hub project ${project} not found`);
-    }
+    const targetProject = await this.resolveProject(project);
     return this.requestJson('PATCH', '/api/agents/bulk', {
       project: targetProject.id,
       enabled,
@@ -539,13 +549,14 @@ export class AgentHubControlClient {
   }
 
   async listAgents(query: AgentHubListAgentsQuery = {}): Promise<unknown[]> {
-    return this.requestJson('GET', this.pathWithQuery('/api/agents', query), undefined, 'dashboard');
+    return this.listAgentsByProjectId(await this.resolveProjectQuery(query));
   }
 
   async getAgent(id: string, options: AgentHubGetAgentOptions = {}): Promise<unknown> {
+    const agentId = await this.resolveAgentId(id, options);
     return this.requestJson(
       'GET',
-      this.pathWithQuery(`/api/agents/${encodeURIComponent(id)}`, {
+      this.pathWithQuery(`/api/agents/${encodeURIComponent(agentId)}`, {
         include_archived: options.includeArchived === true ? true : undefined,
       }),
       undefined,
@@ -554,11 +565,16 @@ export class AgentHubControlClient {
   }
 
   async getSchedulerStatus(query: AgentHubSchedulerStatusQuery = {}): Promise<unknown> {
-    return this.requestJson('GET', this.pathWithQuery('/api/scheduler/status', query), undefined, 'dashboard');
+    return this.requestJson(
+      'GET',
+      this.pathWithQuery('/api/scheduler/status', await this.resolveProjectQuery(query)),
+      undefined,
+      'dashboard',
+    );
   }
 
   async listExecutors(query: AgentHubListExecutorsQuery = {}): Promise<unknown[]> {
-    return this.requestJson('GET', this.pathWithQuery('/api/executors', query), undefined, 'dashboard');
+    return this.listExecutorsByProjectId(await this.resolveProjectQuery(query));
   }
 
   async listAlerts(query: AgentHubListAlertsQuery = {}): Promise<unknown[]> {
@@ -588,34 +604,48 @@ export class AgentHubControlClient {
     return this.requestJson('POST', '/api/agents', input, 'dashboard');
   }
 
-  async updateAgent(agentId: string, patch: AgentHubUpdateAgentInput): Promise<unknown> {
-    return this.requestJson('PATCH', `/api/agents/${encodeURIComponent(agentId)}`, patch, 'dashboard');
+  async updateAgent(
+    agentId: string,
+    patch: AgentHubUpdateAgentInput,
+    options: AgentHubAgentTargetOptions = {},
+  ): Promise<unknown> {
+    const resolvedAgentId = await this.resolveAgentId(agentId, options);
+    return this.requestJson('PATCH', `/api/agents/${encodeURIComponent(resolvedAgentId)}`, patch, 'dashboard');
   }
 
-  async deleteAgent(agentId: string): Promise<void> {
-    await this.requestJson('DELETE', `/api/agents/${encodeURIComponent(agentId)}`, undefined, 'dashboard');
+  async deleteAgent(agentId: string, options: AgentHubAgentTargetOptions = {}): Promise<void> {
+    const resolvedAgentId = await this.resolveAgentId(agentId, options);
+    await this.requestJson('DELETE', `/api/agents/${encodeURIComponent(resolvedAgentId)}`, undefined, 'dashboard');
   }
 
   async drainAgent(
     agentId: string,
     options: AgentHubDrainAgentOptions = {},
   ): Promise<AgentHubDrainAgentResult> {
-    return this.requestJson('POST', `/api/agents/${encodeURIComponent(agentId)}/drain`, {
+    const resolvedAgentId = await this.resolveAgentId(agentId, options);
+    return this.requestJson('POST', `/api/agents/${encodeURIComponent(resolvedAgentId)}/drain`, {
       cancel_running: options.cancelRunning === true,
     }, 'dashboard');
   }
 
   async getAgentSchedulePreview(agentId: string, options: AgentHubSchedulePreviewOptions = {}): Promise<unknown> {
+    const resolvedAgentId = await this.resolveAgentId(agentId, options);
     return this.requestJson(
       'GET',
-      this.pathWithQuery(`/api/agents/${encodeURIComponent(agentId)}/schedule-preview`, options),
+      this.pathWithQuery(`/api/agents/${encodeURIComponent(resolvedAgentId)}/schedule-preview`, {
+        limit: options.limit,
+      }),
       undefined,
       'dashboard',
     );
   }
 
-  async setAgentEnabled(agentId: string, enabled: boolean): Promise<unknown> {
-    return this.updateAgent(agentId, { enabled });
+  async setAgentEnabled(
+    agentId: string,
+    enabled: boolean,
+    options: AgentHubAgentTargetOptions = {},
+  ): Promise<unknown> {
+    return this.updateAgent(agentId, { enabled }, options);
   }
 
   async listExecutions(query: AgentHubListExecutionsQuery = {}): Promise<unknown[]> {
@@ -692,6 +722,56 @@ export class AgentHubControlClient {
 
   async rerunExecution(executionId: string): Promise<unknown> {
     return this.requestJson('POST', `/api/executions/${encodeURIComponent(executionId)}/rerun`, undefined, 'dashboard');
+  }
+
+  private async resolveProject(project: string): Promise<AgentHubProjectRecord> {
+    const projects = await this.listProjects() as AgentHubProjectRecord[];
+    const targetProject = projects.find((candidate) => projectRecordMatches(candidate, project));
+    if (!targetProject) {
+      throw new Error(`Agent Hub project ${project} not found`);
+    }
+    return targetProject;
+  }
+
+  private async resolveProjectQuery<T extends { project?: string }>(query: T): Promise<T> {
+    if (!query.project) return query;
+    return {
+      ...query,
+      project: (await this.resolveProject(query.project)).id,
+    };
+  }
+
+  private async listAgentsByProjectId(query: AgentHubListAgentsQuery = {}): Promise<unknown[]> {
+    return this.requestJson('GET', this.pathWithQuery('/api/agents', query), undefined, 'dashboard');
+  }
+
+  private async listExecutorsByProjectId(query: AgentHubListExecutorsQuery = {}): Promise<unknown[]> {
+    return this.requestJson('GET', this.pathWithQuery('/api/executors', query), undefined, 'dashboard');
+  }
+
+  private async resolveAgentId(
+    agent: string,
+    options: AgentHubAgentTargetOptions & { includeArchived?: boolean } = {},
+  ): Promise<string> {
+    if (!options.project && looksLikeDirectAgentId(agent)) {
+      return agent;
+    }
+
+    const projectId = options.project ? (await this.resolveProject(options.project)).id : undefined;
+    const agents = await this.listAgentsByProjectId({
+      project: projectId,
+      archived: options.includeArchived === true ? 'include' : undefined,
+    }) as AgentHubAgentRecord[];
+    const matches = agents.filter((candidate) => candidate.id === agent || candidate.name === agent);
+
+    if (matches.length === 1) {
+      return matches[0].id;
+    }
+    if (matches.length === 0) {
+      const projectSuffix = options.project ? ` in project ${options.project}` : '';
+      throw new Error(`Agent Hub agent ${agent} not found${projectSuffix}`);
+    }
+    throw new Error(`Agent Hub agent ${agent} is ambiguous; pass --project`);
   }
 
   private pathWithQuery(path: string, query: object): string {

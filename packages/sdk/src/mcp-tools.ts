@@ -3,6 +3,7 @@ import {
   type AgentHubControlClient,
   type AgentHubAcknowledgeAlertOptions,
   type AgentHubArchiveFilter,
+  type AgentHubAgentTargetOptions,
   type AgentHubCreateAgentInput,
   type AgentHubCreateProjectInput,
   type AgentHubDedupPolicy,
@@ -128,7 +129,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_get_scheduler_status",
-      description: "Get scheduler diagnostics including queue depth, dispatch state, capacity, and upcoming cron timestamps.",
+      description: "Get scheduler diagnostics including queue depth, dispatch state, capacity, and upcoming cron timestamps. The project filter accepts a project name or id.",
       inputSchema: {
         project: z.string().optional(),
         agentId: z.string().optional(),
@@ -140,7 +141,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_list_executors",
-      description: "List online executor heartbeats and active execution counts for a project.",
+      description: "List online executor heartbeats and active execution counts for a project name or id.",
       inputSchema: {
         project: z.string().optional(),
       },
@@ -173,7 +174,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_list_agents",
-      description: "List registered agents and their current executor status.",
+      description: "List registered agents and their current executor status. The project filter accepts a project name or id.",
       inputSchema: {
         project: z.string().optional(),
         type: z.string().optional(),
@@ -189,12 +190,14 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_get_agent",
-      description: "Get one agent by id, optionally including archived records and recent execution history.",
+      description: "Get one agent by id or by name with an optional project selector.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
         includeArchived: z.boolean().optional(),
       },
       handler: async (args) => toMcpText(await client.getAgent(args.agentId as string, compactDefined({
+        project: stringArg(args.project),
         includeArchived: booleanArg(args.includeArchived),
       }))),
     },
@@ -248,9 +251,10 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_update_agent",
-      description: "Update dashboard-managed agent schedule and execution settings by id.",
+      description: "Update dashboard-managed agent schedule and execution settings by id or by name with an optional project selector.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
         displayName: z.string().optional(),
         description: z.string().nullable().optional(),
         cronExpression: z.string().nullable().optional(),
@@ -270,58 +274,76 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         idempotencyWindowSeconds: z.number().int().min(1).optional(),
         labels: z.record(z.string(), z.string()).optional(),
       },
-      handler: async (args) => toMcpText(await client.updateAgent(args.agentId as string, compactDefined({
-        displayName: stringArg(args.displayName),
-        description: nullableStringArg(args.description),
-        cronExpression: nullableStringArg(args.cronExpression),
-        handlerName: nullableStringArg(args.handlerName),
-        enabled: booleanArg(args.enabled),
-        misfirePolicy: misfirePolicyArg(args.misfirePolicy),
-        concurrency: numberArg(args.concurrency),
-        maxPendingQueue: numberArg(args.maxPendingQueue),
-        timeoutSeconds: numberArg(args.timeoutSeconds),
-        retryMax: numberArg(args.retryMax),
-        retryBackoffBaseMs: numberArg(args.retryBackoffBaseMs),
-        maxTurns: nullableNumberArg(args.maxTurns),
-        maxCostUsd: nullableNumberArg(args.maxCostUsd),
-        executorHost: nullableStringArg(args.executorHost),
-        inputSchema: recordOrNullArg(args.inputSchema),
-        allowTriggerBy: recordOrNullArg(args.allowTriggerBy),
-        idempotencyWindowSeconds: numberArg(args.idempotencyWindowSeconds),
-        labels: stringRecordArg(args.labels),
-      }) as AgentHubUpdateAgentInput)),
+      handler: async (args) => {
+        const patch = compactDefined({
+          displayName: stringArg(args.displayName),
+          description: nullableStringArg(args.description),
+          cronExpression: nullableStringArg(args.cronExpression),
+          handlerName: nullableStringArg(args.handlerName),
+          enabled: booleanArg(args.enabled),
+          misfirePolicy: misfirePolicyArg(args.misfirePolicy),
+          concurrency: numberArg(args.concurrency),
+          maxPendingQueue: numberArg(args.maxPendingQueue),
+          timeoutSeconds: numberArg(args.timeoutSeconds),
+          retryMax: numberArg(args.retryMax),
+          retryBackoffBaseMs: numberArg(args.retryBackoffBaseMs),
+          maxTurns: nullableNumberArg(args.maxTurns),
+          maxCostUsd: nullableNumberArg(args.maxCostUsd),
+          executorHost: nullableStringArg(args.executorHost),
+          inputSchema: recordOrNullArg(args.inputSchema),
+          allowTriggerBy: recordOrNullArg(args.allowTriggerBy),
+          idempotencyWindowSeconds: numberArg(args.idempotencyWindowSeconds),
+          labels: stringRecordArg(args.labels),
+        }) as AgentHubUpdateAgentInput;
+        const options = agentTargetOptions(args);
+        return toMcpText(
+          hasKeys(options)
+            ? await client.updateAgent(args.agentId as string, patch, options)
+            : await client.updateAgent(args.agentId as string, patch),
+        );
+      },
     },
     {
       name: "agent_hub_preview_agent_schedule",
-      description: "Preview future cron run timestamps for one agent by id.",
+      description: "Preview future cron run timestamps for one agent by id or by name with an optional project selector.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
         limit: z.number().int().min(1).max(50).optional(),
       },
       handler: async (args) => toMcpText(await client.getAgentSchedulePreview(args.agentId as string, compactDefined({
         limit: numberArg(args.limit),
+        project: stringArg(args.project),
       }) as AgentHubSchedulePreviewOptions)),
     },
     {
       name: "agent_hub_delete_agent",
-      description: "Archive a dashboard-managed agent by id after active work has drained.",
+      description: "Archive a dashboard-managed agent by id or by name with an optional project selector after active work has drained.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
       },
       handler: async (args) => {
-        await client.deleteAgent(args.agentId as string);
+        const options = agentTargetOptions(args);
+        if (hasKeys(options)) {
+          await client.deleteAgent(args.agentId as string, options);
+        } else {
+          await client.deleteAgent(args.agentId as string);
+        }
         return toMcpText({ ok: true });
       },
     },
     {
       name: "agent_hub_drain_agent",
-      description: "Disable an agent and cancel queued executions before deletion; optionally cancel running executions too.",
+      description: "Disable an agent by id or by name with an optional project selector and cancel queued executions before deletion; optionally cancel running executions too.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
         cancelRunning: z.boolean().optional(),
       },
       handler: async (args) => toMcpText(await client.drainAgent(args.agentId as string, compactDefined({
         cancelRunning: booleanArg(args.cancelRunning),
+        project: stringArg(args.project),
       }) as AgentHubDrainAgentOptions)),
     },
     {
@@ -414,12 +436,20 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_set_agent_enabled",
-      description: "Enable or disable an agent by id.",
+      description: "Enable or disable an agent by id or by name with an optional project selector.",
       inputSchema: {
         agentId: z.string().min(1),
+        project: z.string().optional(),
         enabled: z.boolean(),
       },
-      handler: async (args) => toMcpText(await client.setAgentEnabled(args.agentId as string, args.enabled as boolean)),
+      handler: async (args) => {
+        const options = agentTargetOptions(args);
+        return toMcpText(
+          hasKeys(options)
+            ? await client.setAgentEnabled(args.agentId as string, args.enabled as boolean, options)
+            : await client.setAgentEnabled(args.agentId as string, args.enabled as boolean),
+        );
+      },
     },
     {
       name: "agent_hub_cancel_execution",
@@ -469,6 +499,16 @@ function compactDefined<T extends Record<string, unknown>>(value: T): Partial<T>
     }
   }
   return result;
+}
+
+function agentTargetOptions(args: Record<string, unknown>): AgentHubAgentTargetOptions {
+  return compactDefined({
+    project: stringArg(args.project),
+  }) as AgentHubAgentTargetOptions;
+}
+
+function hasKeys(value: object): boolean {
+  return Object.keys(value).length > 0;
 }
 
 function stringArg(value: unknown): string | undefined {

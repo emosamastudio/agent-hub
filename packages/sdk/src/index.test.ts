@@ -9,6 +9,8 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
   });
 }
 
+const directAgentId = "11111111-1111-4111-8111-111111111111";
+
 describe("AgentHubClient", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -1174,16 +1176,20 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  test("getAgent can explicitly include archived records", async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1?include_archived=true");
-      expect(init?.method).toBe("GET");
-      expect(init?.headers).toMatchObject({
-        Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
-        "Agent-Hub-Version": "1",
-      });
-      expect(init?.body).toBeUndefined();
-      return jsonResponse({ id: "agent-1", archivedAt: "2026-05-20T10:00:00.000Z" });
+  test("listAgents resolves project names before querying dashboard agents", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      requests.push(url);
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "deep_research" }]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1194,8 +1200,37 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.getAgent("agent-1", { includeArchived: true })).resolves.toEqual({
-      id: "agent-1",
+    await expect(client.listAgents({ project: "oph" })).resolves.toEqual([
+      { id: "agent-1", name: "deep_research" },
+    ]);
+    expect(requests).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1",
+    ]);
+  });
+
+  test("getAgent can explicitly include archived records", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}?include_archived=true`);
+      expect(init?.method).toBe("GET");
+      expect(init?.headers).toMatchObject({
+        Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
+        "Agent-Hub-Version": "1",
+      });
+      expect(init?.body).toBeUndefined();
+      return jsonResponse({ id: directAgentId, archivedAt: "2026-05-20T10:00:00.000Z" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.getAgent(directAgentId, { includeArchived: true })).resolves.toEqual({
+      id: directAgentId,
       archivedAt: "2026-05-20T10:00:00.000Z",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -1232,7 +1267,14 @@ describe("AgentHubControlClient", () => {
   });
 
   test("listExecutors reads executor status from the dashboard endpoint", async () => {
+    const requests: string[] = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(input.toString());
+      if (input.toString() === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
       expect(input.toString()).toBe("http://hub/api/executors?project=project-1");
       expect(init?.method).toBe("GET");
       expect(init?.headers).toMatchObject({
@@ -1251,10 +1293,13 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.listExecutors({ project: "project-1" })).resolves.toEqual([
+    await expect(client.listExecutors({ project: "oph" })).resolves.toEqual([
       { agent_name: "oph_deep_research", executor_status: "online" },
     ]);
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(requests).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/executors?project=project-1",
+    ]);
   });
 
   test("listAlerts and acknowledgeAlert operate on dashboard alert endpoints", async () => {
@@ -1384,14 +1429,14 @@ describe("AgentHubControlClient", () => {
 
   test("setAgentEnabled patches the dashboard agent endpoint", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1");
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}`);
       expect(init?.method).toBe("PATCH");
       expect(init?.headers).toMatchObject({
         Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
         "Agent-Hub-Version": "1",
       });
       expect(JSON.parse(init?.body as string)).toEqual({ enabled: false });
-      return jsonResponse({ id: "agent-1", enabled: false });
+      return jsonResponse({ id: directAgentId, enabled: false });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1402,8 +1447,72 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.setAgentEnabled("agent-1", false)).resolves.toEqual({ id: "agent-1", enabled: false });
+    await expect(client.setAgentEnabled(directAgentId, false)).resolves.toEqual({ id: directAgentId, enabled: false });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  test("setAgentEnabled resolves an agent name inside a project before patching", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: input.toString(), init });
+      if (input.toString() === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (input.toString() === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([
+          { id: "agent-1", projectId: "project-1", name: "deep_research", enabled: false },
+        ]);
+      }
+      if (input.toString() === "http://hub/api/agents/agent-1") {
+        expect(init?.method).toBe("PATCH");
+        expect(JSON.parse(init?.body as string)).toEqual({ enabled: true });
+        return jsonResponse({ id: "agent-1", name: "deep_research", enabled: true });
+      }
+      throw new Error(`Unexpected request: ${input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.setAgentEnabled("deep_research", true, {
+      project: "oph",
+    })).resolves.toEqual({ id: "agent-1", name: "deep_research", enabled: true });
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1",
+      "http://hub/api/agents/agent-1",
+    ]);
+  });
+
+  test("name-based agent operations reject ambiguous names without a project", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (input.toString() === "http://hub/api/agents") {
+        return jsonResponse([
+          { id: "agent-1", projectId: "project-1", name: "deep_research" },
+          { id: "agent-2", projectId: "project-2", name: "deep_research" },
+        ]);
+      }
+      throw new Error(`Unexpected request: ${input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.setAgentEnabled("deep_research", false)).rejects.toThrow(
+      "Agent Hub agent deep_research is ambiguous; pass --project",
+    );
   });
 
   test("createAgent posts a dashboard-managed agent", async () => {
@@ -1450,7 +1559,7 @@ describe("AgentHubControlClient", () => {
 
   test("updateAgent patches dashboard-managed agent settings", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1");
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}`);
       expect(init?.method).toBe("PATCH");
       expect(init?.headers).toMatchObject({
         Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
@@ -1462,7 +1571,7 @@ describe("AgentHubControlClient", () => {
         handlerName: "renamed_handler",
         retryMax: 0,
       });
-      return jsonResponse({ id: "agent-1", displayName: "Renamed Agent" });
+      return jsonResponse({ id: directAgentId, displayName: "Renamed Agent" });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1473,18 +1582,18 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.updateAgent("agent-1", {
+    await expect(client.updateAgent(directAgentId, {
       displayName: "Renamed Agent",
       cronExpression: null,
       handlerName: "renamed_handler",
       retryMax: 0,
-    })).resolves.toEqual({ id: "agent-1", displayName: "Renamed Agent" });
+    })).resolves.toEqual({ id: directAgentId, displayName: "Renamed Agent" });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   test("getAgentSchedulePreview reads future cron runs from the dashboard endpoint", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1/schedule-preview?limit=3");
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}/schedule-preview?limit=3`);
       expect(init?.method).toBe("GET");
       expect(init?.headers).toMatchObject({
         Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
@@ -1502,7 +1611,7 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.getAgentSchedulePreview("agent-1", { limit: 3 })).resolves.toEqual({
+    await expect(client.getAgentSchedulePreview(directAgentId, { limit: 3 })).resolves.toEqual({
       runs: ["2026-05-20T12:00:00.000Z"],
     });
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -1510,7 +1619,7 @@ describe("AgentHubControlClient", () => {
 
   test("deleteAgent deletes a dashboard-managed agent", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1");
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}`);
       expect(init?.method).toBe("DELETE");
       expect(init?.headers).toMatchObject({
         Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
@@ -1528,13 +1637,13 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.deleteAgent("agent-1")).resolves.toBeUndefined();
+    await expect(client.deleteAgent(directAgentId)).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   test("drainAgent posts queued and running cancellation intent", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(input.toString()).toBe("http://hub/api/agents/agent-1/drain");
+      expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}/drain`);
       expect(init?.method).toBe("POST");
       expect(init?.headers).toMatchObject({
         Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
@@ -1543,7 +1652,7 @@ describe("AgentHubControlClient", () => {
       expect(JSON.parse(init?.body as string)).toEqual({ cancel_running: true });
       return jsonResponse({
         ok: true,
-        agent_id: "agent-1",
+        agent_id: directAgentId,
         cancelled_queued: 1,
         cancelled_running: 1,
         active_execution_count: 0,
@@ -1558,9 +1667,9 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.drainAgent("agent-1", { cancelRunning: true })).resolves.toEqual({
+    await expect(client.drainAgent(directAgentId, { cancelRunning: true })).resolves.toEqual({
       ok: true,
-      agent_id: "agent-1",
+      agent_id: directAgentId,
       cancelled_queued: 1,
       cancelled_running: 1,
       active_execution_count: 0,

@@ -4,6 +4,7 @@ import {
   AgentHubControlClient,
   type AgentHubArchiveFilter,
   type AgentHubAcknowledgeAlertOptions,
+  type AgentHubAgentTargetOptions,
   type AgentHubAgentType,
   type AgentHubControlConfig,
   type AgentHubCreateProjectInput,
@@ -48,10 +49,10 @@ type CliInvocation =
   | { command: "agents:list"; query: AgentHubListAgentsQuery }
   | { command: "agents:get"; agentId: string; options: AgentHubGetAgentOptions }
   | { command: "agents:create"; input: AgentHubCreateAgentInput }
-  | { command: "agents:update"; agentId: string; patch: AgentHubUpdateAgentInput }
+  | { command: "agents:update"; agentId: string; patch: AgentHubUpdateAgentInput; options: AgentHubAgentTargetOptions }
   | { command: "agents:schedule-preview"; agentId: string; options: AgentHubSchedulePreviewOptions }
-  | { command: "agents:set-enabled"; agentId: string; enabled: boolean }
-  | { command: "agents:delete"; agentId: string }
+  | { command: "agents:set-enabled"; agentId: string; enabled: boolean; options: AgentHubAgentTargetOptions }
+  | { command: "agents:delete"; agentId: string; options: AgentHubAgentTargetOptions }
   | { command: "agents:drain"; agentId: string; options: AgentHubDrainAgentOptions }
   | { command: "executions:list"; query: AgentHubListExecutionsQuery }
   | { command: "executions:get"; executionId: string }
@@ -242,6 +243,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         command: "agents:get",
         agentId: third,
         options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
           includeArchived: parsed.flags["include-archived"] === true ? true : undefined,
         }),
       };
@@ -306,6 +308,9 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         command: "agents:update",
         agentId: third,
         patch,
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+        }),
       };
     }
     if (subcommand === "schedule-preview") {
@@ -315,6 +320,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         agentId: third,
         options: compactDefined({
           limit: positiveNumberFlag(parsed.flags, "limit"),
+          project: stringFlag(parsed.flags, "project"),
         }),
       };
     }
@@ -324,6 +330,9 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         command: "agents:set-enabled",
         agentId: third,
         enabled: subcommand === "enable",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+        }),
       };
     }
     if (subcommand === "delete") {
@@ -331,6 +340,9 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       return {
         command: "agents:delete",
         agentId: third,
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+        }),
       };
     }
     if (subcommand === "drain") {
@@ -340,6 +352,9 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         agentId: third,
         options: {
           cancelRunning: parsed.flags["cancel-running"] === true,
+          ...compactDefined({
+            project: stringFlag(parsed.flags, "project"),
+          }),
         },
       };
     }
@@ -483,13 +498,13 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
     case "agents:create":
       return client.createAgent(invocation.input);
     case "agents:update":
-      return client.updateAgent(invocation.agentId, invocation.patch);
+      return client.updateAgent(invocation.agentId, invocation.patch, invocation.options);
     case "agents:schedule-preview":
       return client.getAgentSchedulePreview(invocation.agentId, invocation.options);
     case "agents:set-enabled":
-      return client.setAgentEnabled(invocation.agentId, invocation.enabled);
+      return client.setAgentEnabled(invocation.agentId, invocation.enabled, invocation.options);
     case "agents:delete":
-      return client.deleteAgent(invocation.agentId);
+      return client.deleteAgent(invocation.agentId, invocation.options);
     case "agents:drain":
       return client.drainAgent(invocation.agentId, invocation.options);
     case "executions:list":
@@ -684,19 +699,19 @@ function helpText(): string {
   agent-hub projects drain <project-name-or-id> [--cancel-running]
   agent-hub projects enable <project-name-or-id>
   agent-hub projects disable <project-name-or-id>
-  agent-hub scheduler status [--agent-id <id>] [--project <project-id>]
-  agent-hub executors list [--project <project-id>]
+  agent-hub scheduler status [--agent-id <id>] [--project <project-name-or-id>]
+  agent-hub executors list [--project <project-name-or-id>]
   agent-hub alerts list [--limit 20] [--include-acknowledged]
   agent-hub alerts acknowledge <alert-id> [--by <actor>]
   agent-hub agents list [--status online] [--type cron_task] [--archived active|include|only]
-  agent-hub agents get <agent-id> [--include-archived]
+  agent-hub agents get <agent-id-or-name> [--project <project-name-or-id>] [--include-archived]
   agent-hub agents create <agent-name> --display-name <name> --description <text> [--type cron_task] [--cron <expr>] [--handler <name>] [--disabled]
-  agent-hub agents update <agent-id> [--display-name <name>] [--cron <expr>|--clear-cron] [--handler <name>|--clear-handler]
-  agent-hub agents schedule-preview <agent-id> [--limit 5]
-  agent-hub agents enable <agent-id>
-  agent-hub agents disable <agent-id>
-  agent-hub agents drain <agent-id> [--cancel-running]
-  agent-hub agents delete <agent-id>
+  agent-hub agents update <agent-id-or-name> [--project <project-name-or-id>] [--display-name <name>] [--cron <expr>|--clear-cron] [--handler <name>|--clear-handler]
+  agent-hub agents schedule-preview <agent-id-or-name> [--project <project-name-or-id>] [--limit 5]
+  agent-hub agents enable <agent-id-or-name> [--project <project-name-or-id>]
+  agent-hub agents disable <agent-id-or-name> [--project <project-name-or-id>]
+  agent-hub agents drain <agent-id-or-name> [--project <project-name-or-id>] [--cancel-running]
+  agent-hub agents delete <agent-id-or-name> [--project <project-name-or-id>]
   agent-hub executions list [--agent-id <id>] [--status queued] [--trigger-type api] [--limit 50] [--offset 0]
   agent-hub executions get <execution-id>
   agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000] [--require-success]

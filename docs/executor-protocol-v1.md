@@ -152,6 +152,14 @@ Stable response fields:
 
 `description` is required and must clearly explain the agent's responsibility. Agent Hub rejects empty or missing descriptions so the dashboard, CLI, MCP tools, and operators can identify every registered agent without reading consumer-project code.
 
+For operator and coding-agent workflows, Agent Hub control tools can target the same registered names. Prefer passing the project selector when operating by name:
+
+```bash
+agent-hub agents get deep_research --project oph
+agent-hub agents disable relationship_agent --project oph
+agent-hub agents enable relationship_agent --project oph
+```
+
 ### Heartbeat
 
 ```http

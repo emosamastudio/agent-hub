@@ -225,11 +225,15 @@ describe("agent-hub CLI", () => {
       command: "agents:set-enabled",
       agentId: "agent-1",
       enabled: true,
+      options: {},
     });
-    expect(parseCliInvocation(["agents", "disable", "agent-1"])).toEqual({
+    expect(parseCliInvocation(["agents", "disable", "deep_research", "--project", "oph"])).toEqual({
       command: "agents:set-enabled",
-      agentId: "agent-1",
+      agentId: "deep_research",
       enabled: false,
+      options: {
+        project: "oph",
+      },
     });
   });
 
@@ -303,6 +307,7 @@ describe("agent-hub CLI", () => {
     ])).toEqual({
       command: "agents:update",
       agentId: "agent-1",
+      options: {},
       patch: {
         displayName: "Renamed Agent",
         cronExpression: null,
@@ -316,14 +321,17 @@ describe("agent-hub CLI", () => {
     expect(parseCliInvocation([
       "agents",
       "schedule-preview",
-      "agent-1",
+      "deep_research",
+      "--project",
+      "oph",
       "--limit",
       "3",
     ])).toEqual({
       command: "agents:schedule-preview",
-      agentId: "agent-1",
+      agentId: "deep_research",
       options: {
         limit: 3,
+        project: "oph",
       },
     });
   });
@@ -345,18 +353,22 @@ describe("agent-hub CLI", () => {
   });
 
   test("parses dashboard agent delete invocations", () => {
-    expect(parseCliInvocation(["agents", "delete", "agent-1"])).toEqual({
+    expect(parseCliInvocation(["agents", "delete", "deep_research", "--project", "oph"])).toEqual({
       command: "agents:delete",
-      agentId: "agent-1",
+      agentId: "deep_research",
+      options: {
+        project: "oph",
+      },
     });
   });
 
   test("parses dashboard agent drain invocations", () => {
-    expect(parseCliInvocation(["agents", "drain", "agent-1", "--cancel-running"])).toEqual({
+    expect(parseCliInvocation(["agents", "drain", "relationship_agent", "--project", "oph", "--cancel-running"])).toEqual({
       command: "agents:drain",
-      agentId: "agent-1",
+      agentId: "relationship_agent",
       options: {
         cancelRunning: true,
+        project: "oph",
       },
     });
   });
