@@ -16,10 +16,13 @@ export class ExecutionRepository {
   }
 
   async findAll(filters: {
-    agentId?: string; status?: string; triggerType?: string;
+    projectId?: string; agentId?: string; status?: string; triggerType?: string;
     since?: Date; limit?: number; offset?: number;
   }) {
     const conditions = [];
+    if (filters.projectId) {
+      conditions.push(sql`${executions.agentId} IN (SELECT id FROM agents WHERE project_id = ${filters.projectId})`);
+    }
     if (filters.agentId) conditions.push(eq(executions.agentId, filters.agentId));
     if (filters.status) conditions.push(eq(executions.status, filters.status as any));
     if (filters.triggerType) conditions.push(eq(executions.triggerType, filters.triggerType as any));

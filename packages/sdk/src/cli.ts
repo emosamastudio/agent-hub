@@ -389,6 +389,8 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       return {
         command: "executions:list",
         query: compactQuery({
+          project: stringFlag(parsed.flags, "project"),
+          agent: stringFlag(parsed.flags, "agent"),
           agent_id: stringFlag(parsed.flags, "agent-id"),
           status: stringFlag(parsed.flags, "status"),
           trigger_type: stringFlag(parsed.flags, "trigger-type"),
@@ -773,7 +775,7 @@ function helpText(): string {
   agent-hub agents disable <agent-id-or-name> [--project <project-name-or-id>]
   agent-hub agents drain <agent-id-or-name> [--project <project-name-or-id>] [--cancel-running]
   agent-hub agents delete <agent-id-or-name> [--project <project-name-or-id>]
-  agent-hub executions list [--agent-id <id>] [--status queued] [--trigger-type api] [--limit 50] [--offset 0]
+  agent-hub executions list [--project <project-name-or-id>] [--agent <agent-id-or-name>] [--agent-id <id>] [--status queued] [--trigger-type api] [--limit 50] [--offset 0]
   agent-hub executions get <execution-id>
   agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000] [--require-success]
   agent-hub executions cancel <execution-id>

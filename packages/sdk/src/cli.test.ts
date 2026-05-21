@@ -165,6 +165,29 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses project-scoped execution list invocations", () => {
+    expect(parseCliInvocation([
+      "executions",
+      "list",
+      "--project",
+      "oph",
+      "--agent",
+      "deep_research",
+      "--status",
+      "failed",
+      "--limit",
+      "10",
+    ])).toEqual({
+      command: "executions:list",
+      query: {
+        project: "oph",
+        agent: "deep_research",
+        status: "failed",
+        limit: 10,
+      },
+    });
+  });
+
   test("parses execution wait invocations", () => {
     expect(parseCliInvocation([
       "executions",

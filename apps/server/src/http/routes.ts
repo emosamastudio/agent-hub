@@ -1086,8 +1086,9 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
 
   // ── Executions (Dashboard API) ──
   app.get("/api/executions", async (request) => {
-    const { agent_id, status, trigger_type, since, limit, offset } = request.query as Record<string, string>;
+    const { project, agent_id, status, trigger_type, since, limit, offset } = request.query as Record<string, string>;
     return ctx.executionRepo.findAll({
+      projectId: project,
       agentId: agent_id,
       status,
       triggerType: trigger_type,

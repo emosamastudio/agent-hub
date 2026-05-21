@@ -411,6 +411,36 @@ describe("Agent Hub MCP tools", () => {
     expect(getAgent).toHaveBeenCalledWith("agent-1", { includeArchived: true });
   });
 
+  test("list executions tool forwards project and agent name filters", async () => {
+    const listExecutions = vi.fn(async () => ([
+      { id: "exec-1", agentId: "agent-1", status: "failed" },
+    ]));
+    const tools = createAgentHubMcpTools({ listExecutions } as any);
+    const listTool = tools.find((tool) => tool.name === "agent_hub_list_executions");
+
+    await expect(listTool?.handler({
+      project: "oph",
+      agent: "deep_research",
+      status: "failed",
+      limit: 10,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify([
+            { id: "exec-1", agentId: "agent-1", status: "failed" },
+          ], null, 2),
+        },
+      ],
+    });
+    expect(listExecutions).toHaveBeenCalledWith({
+      project: "oph",
+      agent: "deep_research",
+      status: "failed",
+      limit: 10,
+    });
+  });
+
   test("trigger tool forwards payload, idempotency, and dedup options", async () => {
     const triggerAgent = vi.fn(async () => ({
       execution_id: "exec-1",

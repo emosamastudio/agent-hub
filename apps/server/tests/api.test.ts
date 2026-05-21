@@ -481,6 +481,53 @@ test("GET /api/executions returns executions", async () => {
   assert.ok(body.length >= 1);
 });
 
+test("GET /api/executions filters executions by project id", async () => {
+  const projectName = scopedName("exec_project");
+  const created = await api("POST", "/api/projects", {
+    name: projectName,
+    displayName: "Execution Project",
+  });
+  assert.strictEqual(created.status, 201);
+
+  const projectAgentName = scopedName("project_execution_agent");
+  const projectAgent = await apiWithBearer("PUT", "/api/registry/agents", created.body.api_key, {
+    name: projectAgentName,
+    displayName: "Project Execution Agent",
+    agentType: "cron_task",
+    handler: "project_execution_handler",
+  });
+  assert.strictEqual(projectAgent.status, 200);
+
+  const projectTrigger = await apiWithBearer("POST", `/api/agents/${projectAgentName}/trigger`, created.body.api_key, {
+    payload: { scope: "project" },
+    dedup_policy: "allow_duplicate",
+  });
+  assert.strictEqual(projectTrigger.status, 202);
+
+  const defaultAgentName = scopedName("default_execution_agent");
+  const defaultAgent = await api("PUT", "/api/registry/agents", {
+    name: defaultAgentName,
+    displayName: "Default Execution Agent",
+    agentType: "cron_task",
+    handler: "default_execution_handler",
+  }, "bearer");
+  assert.strictEqual(defaultAgent.status, 200);
+
+  const defaultTrigger = await api("POST", `/api/agents/${defaultAgentName}/trigger`, {
+    payload: { scope: "default" },
+    dedup_policy: "allow_duplicate",
+  }, "bearer");
+  assert.strictEqual(defaultTrigger.status, 202);
+
+  const { status, body } = await api("GET", `/api/executions?project=${created.body.project.id}&limit=20`);
+  assert.strictEqual(status, 200);
+  assert.ok(Array.isArray(body));
+  const executionIds = body.map((execution: any) => execution.id);
+  assert.ok(executionIds.includes(projectTrigger.body.execution_id));
+  assert.ok(!executionIds.includes(defaultTrigger.body.execution_id));
+  assert.ok(body.every((execution: any) => execution.agentId === projectAgent.body.id));
+});
+
 test("POST /api/executors/heartbeat succeeds", async () => {
   const { status, body } = await api("POST", "/api/executors/heartbeat", {
     agent_names: [testAgentName],

@@ -274,5 +274,6 @@ Useful checks:
 node packages/sdk/dist/cli.js agents list --project <project-id>
 node packages/sdk/dist/cli.js scheduler status --project <project-id>
 node packages/sdk/dist/cli.js executors list --project <project-id>
-node packages/sdk/dist/cli.js executions list --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --project <project-id> --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --project <project-id> --agent deep_research --status failed --limit 20
 ```

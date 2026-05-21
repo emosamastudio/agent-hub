@@ -364,8 +364,10 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_list_executions",
-      description: "List executions with optional status, agent, trigger, and pagination filters.",
+      description: "List executions with optional project, agent, status, trigger, and pagination filters.",
       inputSchema: {
+        project: z.string().optional(),
+        agent: z.string().optional(),
         agentId: z.string().optional(),
         status: z.string().optional(),
         triggerType: z.string().optional(),
@@ -374,6 +376,8 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         offset: z.number().int().nonnegative().optional(),
       },
       handler: async (args) => toMcpText(await client.listExecutions(compact({
+        project: stringArg(args.project),
+        agent: stringArg(args.agent),
         agent_id: stringArg(args.agentId),
         status: stringArg(args.status),
         trigger_type: stringArg(args.triggerType),

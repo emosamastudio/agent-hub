@@ -289,7 +289,8 @@ node packages/sdk/dist/cli.js agents delete deep_research --project oph
 node packages/sdk/dist/cli.js executors list --project oph
 node packages/sdk/dist/cli.js alerts list --limit 20
 node packages/sdk/dist/cli.js alerts acknowledge <alert-id> --by agent
-node packages/sdk/dist/cli.js executions list --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --project oph --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --project oph --agent deep_research --status failed --limit 20
 node packages/sdk/dist/cli.js executions get <execution-id>
 node packages/sdk/dist/cli.js executions wait <execution-id> --timeout-ms 600000 --interval-ms 1000 --require-success
 node packages/sdk/dist/cli.js executions cancel <execution-id>
@@ -316,6 +317,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 `scheduler status` returns the control-plane scheduler snapshot for active agents, including queued/running counts, active concurrency, queue capacity, dispatch state, schedule state, cron due timestamp, and next run timestamp. Use it before debugging a worker to distinguish "nothing due", "executor offline", "queue full", and "ready to dispatch".
 
 `executors list` shows online executor heartbeats and active execution counts. `alerts list` and `alerts acknowledge` expose the operational alert loop for agents, so a coding agent can inspect queue/failure pressure and mark handled alerts without using the dashboard.
+
+`executions list` accepts `--project <name-or-id>` and `--agent <agent-id-or-name>` so agents can inspect OPH runs by project and agent name without first resolving internal ids. Use `--agent-id` when a script already has the exact id.
 
 `doctor --project <name-or-id>` runs the agent-facing deployment diagnostic in one call. It checks health, readiness, metrics, scheduler state, project discovery, registered agents, executor heartbeats, and active alerts, then returns a structured report with `ok`, `summary.errors`, `summary.warnings`, and per-check details.
 

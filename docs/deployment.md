@@ -102,11 +102,11 @@ Useful operator loop:
 ```bash
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning
 node packages/sdk/dist/cli.js doctor --project oph
-node packages/sdk/dist/cli.js scheduler status
-node packages/sdk/dist/cli.js agents list
-node packages/sdk/dist/cli.js executors list
-node packages/sdk/dist/cli.js executions list --status queued --limit 20
-node packages/sdk/dist/cli.js executions list --status running --limit 20
+node packages/sdk/dist/cli.js scheduler status --project oph
+node packages/sdk/dist/cli.js agents list --project oph
+node packages/sdk/dist/cli.js executors list --project oph
+node packages/sdk/dist/cli.js executions list --project oph --status queued --limit 20
+node packages/sdk/dist/cli.js executions list --project oph --status running --limit 20
 node packages/sdk/dist/cli.js alerts list --limit 20
 ```
 

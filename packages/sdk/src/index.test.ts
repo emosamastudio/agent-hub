@@ -1372,6 +1372,48 @@ describe("AgentHubControlClient", () => {
     ]);
   });
 
+  test("listExecutions resolves project and agent names before querying executions", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      requests.push(url);
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (url === "http://hub/api/agents?project=project-1&archived=include") {
+        return jsonResponse([{ id: "agent-1", name: "deep_research" }]);
+      }
+      if (url === "http://hub/api/executions?agent_id=agent-1&status=failed&limit=10") {
+        return jsonResponse([{ id: "exec-1", agentId: "agent-1", status: "failed" }]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.listExecutions({
+      project: "oph",
+      agent: "deep_research",
+      status: "failed",
+      limit: 10,
+    } as any)).resolves.toEqual([
+      { id: "exec-1", agentId: "agent-1", status: "failed" },
+    ]);
+    expect(requests).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1&archived=include",
+      "http://hub/api/executions?agent_id=agent-1&status=failed&limit=10",
+    ]);
+  });
+
   test("getAgent can explicitly include archived records", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}?include_archived=true`);

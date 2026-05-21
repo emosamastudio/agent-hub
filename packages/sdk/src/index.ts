@@ -121,6 +121,8 @@ export interface AgentHubAcknowledgeAlertOptions {
 }
 
 export interface AgentHubListExecutionsQuery {
+  project?: string;
+  agent?: string;
   agent_id?: string;
   status?: string;
   trigger_type?: string;
@@ -773,7 +775,12 @@ export class AgentHubControlClient {
   }
 
   async listExecutions(query: AgentHubListExecutionsQuery = {}): Promise<unknown[]> {
-    return this.requestJson('GET', this.pathWithQuery('/api/executions', query), undefined, 'dashboard');
+    return this.requestJson(
+      'GET',
+      this.pathWithQuery('/api/executions', await this.resolveExecutionQuery(query)),
+      undefined,
+      'dashboard',
+    );
   }
 
   async getExecution(id: string): Promise<unknown> {
@@ -896,6 +903,48 @@ export class AgentHubControlClient {
       ...query,
       project: (await this.resolveProject(query.project)).id,
     };
+  }
+
+  private async resolveExecutionQuery(query: AgentHubListExecutionsQuery): Promise<Record<string, QueryValue>> {
+    const projectId = query.project ? (await this.resolveProject(query.project)).id : undefined;
+    const agentId = query.agent
+      ? await this.resolveAgentIdFromProjectAgentList(query.agent, projectId, query.project)
+      : query.agent_id;
+
+    return {
+      project: agentId ? undefined : projectId,
+      agent_id: agentId,
+      status: query.status,
+      trigger_type: query.trigger_type,
+      since: query.since,
+      limit: query.limit,
+      offset: query.offset,
+    };
+  }
+
+  private async resolveAgentIdFromProjectAgentList(
+    agent: string,
+    projectId: string | undefined,
+    projectLabel: string | undefined,
+  ): Promise<string> {
+    if (!projectId && looksLikeDirectAgentId(agent)) {
+      return agent;
+    }
+
+    const agents = await this.listAgentsByProjectId({
+      project: projectId,
+      archived: 'include',
+    }) as AgentHubAgentRecord[];
+    const matches = agents.filter((candidate) => candidate.id === agent || candidate.name === agent);
+
+    if (matches.length === 1) {
+      return matches[0].id;
+    }
+    if (matches.length === 0) {
+      const projectSuffix = projectLabel ? ` in project ${projectLabel}` : '';
+      throw new Error(`Agent Hub agent ${agent} not found${projectSuffix}`);
+    }
+    throw new Error(`Agent Hub agent ${agent} is ambiguous; pass --project`);
   }
 
   private async listAgentsByProjectId(query: AgentHubListAgentsQuery = {}): Promise<unknown[]> {
