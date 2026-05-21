@@ -44,6 +44,19 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses project enable and disable invocations", () => {
+    expect(parseCliInvocation(["projects", "enable", "oph"])).toEqual({
+      command: "projects:set-enabled",
+      project: "oph",
+      enabled: true,
+    });
+    expect(parseCliInvocation(["projects", "disable", "project-1"])).toEqual({
+      command: "projects:set-enabled",
+      project: "project-1",
+      enabled: false,
+    });
+  });
+
   test("parses trigger invocations with JSON payload and dedup options", () => {
     expect(parseCliInvocation([
       "trigger",

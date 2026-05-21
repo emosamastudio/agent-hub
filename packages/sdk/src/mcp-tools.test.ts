@@ -15,6 +15,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_create_project",
       "agent_hub_rotate_project_api_key",
       "agent_hub_drain_project",
+      "agent_hub_set_project_enabled",
       "agent_hub_get_scheduler_status",
       "agent_hub_list_executors",
       "agent_hub_list_alerts",
@@ -220,6 +221,30 @@ describe("Agent Hub MCP tools", () => {
       }],
     });
     expect(drainProject).toHaveBeenCalledWith("oph", { cancelRunning: true });
+  });
+
+  test("project enabled tool forwards project name and desired state", async () => {
+    const setProjectEnabled = vi.fn(async () => ({
+      ok: true,
+      count: 3,
+    }));
+    const tools = createAgentHubMcpTools({
+      setProjectEnabled,
+    } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_set_project_enabled")?.handler({
+      project: "oph",
+      enabled: true,
+    })).resolves.toEqual({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          count: 3,
+        }, null, 2),
+      }],
+    });
+    expect(setProjectEnabled).toHaveBeenCalledWith("oph", true);
   });
 
   test("scheduler status tool forwards filter options", async () => {

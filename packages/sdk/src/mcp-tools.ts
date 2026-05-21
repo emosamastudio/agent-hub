@@ -118,6 +118,15 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       }) as AgentHubDrainProjectOptions)),
     },
     {
+      name: "agent_hub_set_project_enabled",
+      description: "Enable or disable every active agent in a project by project name or id.",
+      inputSchema: {
+        project: z.string().min(1),
+        enabled: z.boolean(),
+      },
+      handler: async (args) => toMcpText(await client.setProjectEnabled(args.project as string, args.enabled as boolean)),
+    },
+    {
       name: "agent_hub_get_scheduler_status",
       description: "Get scheduler diagnostics including queue depth, dispatch state, capacity, and upcoming cron timestamps.",
       inputSchema: {

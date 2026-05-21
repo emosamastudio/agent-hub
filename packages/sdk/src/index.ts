@@ -249,6 +249,11 @@ export interface AgentHubDrainProjectResult {
   active_execution_count: number;
 }
 
+export interface AgentHubSetProjectEnabledResult {
+  ok: true;
+  count: number;
+}
+
 export type AgentHubAgentType = 'cron_task' | 'llm_agent';
 export type AgentHubMisfirePolicy = 'fire_once' | 'fire_all' | 'drop';
 
@@ -518,6 +523,18 @@ export class AgentHubControlClient {
     }
     return this.requestJson('POST', `/api/projects/${encodeURIComponent(targetProject.id)}/drain`, {
       cancel_running: options.cancelRunning === true,
+    }, 'dashboard');
+  }
+
+  async setProjectEnabled(project: string, enabled: boolean): Promise<AgentHubSetProjectEnabledResult> {
+    const projects = await this.listProjects() as AgentHubProjectRecord[];
+    const targetProject = projects.find((candidate) => projectRecordMatches(candidate, project));
+    if (!targetProject) {
+      throw new Error(`Agent Hub project ${project} not found`);
+    }
+    return this.requestJson('PATCH', '/api/agents/bulk', {
+      project: targetProject.id,
+      enabled,
     }, 'dashboard');
   }
 

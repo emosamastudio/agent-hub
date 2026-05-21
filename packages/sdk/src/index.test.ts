@@ -1052,6 +1052,61 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("setProjectEnabled resolves a project name and toggles project agents", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input.toString();
+      requests.push({ url, init });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+      if (url === "http://hub/api/agents/bulk") {
+        return jsonResponse({ ok: true, count: 3 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+    });
+
+    await expect(client.setProjectEnabled("oph", true)).resolves.toEqual({
+      ok: true,
+      count: 3,
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/agents/bulk",
+    ]);
+    expect(JSON.parse(requests[1].init?.body as string)).toEqual({
+      project: "project-1",
+      enabled: true,
+    });
+  });
+
+  test("setProjectEnabled reports missing projects before sending bulk patch requests", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/projects") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+    });
+
+    await expect(client.setProjectEnabled("oph", false)).rejects.toThrow("Agent Hub project oph not found");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test("ensureProject creates a missing project and returns the one-time API key", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

@@ -254,6 +254,8 @@ node packages/sdk/dist/cli.js projects create oph \
   --description "OPH executor integration"
 node packages/sdk/dist/cli.js projects rotate-key <project-id>
 node packages/sdk/dist/cli.js projects drain oph --cancel-running
+node packages/sdk/dist/cli.js projects disable oph
+node packages/sdk/dist/cli.js projects enable oph
 node packages/sdk/dist/cli.js scheduler status --agent-id <agent-id>
 node packages/sdk/dist/cli.js agents list --status online
 node packages/sdk/dist/cli.js agents list --archived only
@@ -311,6 +313,8 @@ node packages/sdk/dist/cli.js trigger demo_agent \
 
 `projects drain <name-or-id>` is the project-level stop switch for incidents and maintenance. It disables every active agent in the project, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided.
 
+`projects disable <name-or-id>` and `projects enable <name-or-id>` toggle scheduling for every active agent in a project without cancelling existing work. Use `projects enable` after a maintenance drain when the executor rollout is ready to accept work again.
+
 Agent creation and SDK registry sync require a clear `description`; treat it as part of the public operator contract for each agent.
 
 CLI connection defaults match local dev:
@@ -340,6 +344,7 @@ Exposed tools:
 - `agent_hub_create_project`
 - `agent_hub_rotate_project_api_key`
 - `agent_hub_drain_project`
+- `agent_hub_set_project_enabled`
 - `agent_hub_get_scheduler_status`
 - `agent_hub_list_executors`
 - `agent_hub_list_alerts`

@@ -40,6 +40,7 @@ type CliInvocation =
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
   | { command: "projects:rotate-key"; projectId: string }
   | { command: "projects:drain"; project: string; options: AgentHubDrainProjectOptions }
+  | { command: "projects:set-enabled"; project: string; enabled: boolean }
   | { command: "scheduler:status"; query: AgentHubSchedulerStatusQuery }
   | { command: "executors:list"; query: AgentHubListExecutorsQuery }
   | { command: "alerts:list"; query: AgentHubListAlertsQuery }
@@ -162,6 +163,14 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         options: {
           cancelRunning: parsed.flags["cancel-running"] === true,
         },
+      };
+    }
+    if (subcommand === "enable" || subcommand === "disable") {
+      if (!third) throw new Error(`Usage: agent-hub projects ${subcommand} <project-name-or-id>`);
+      return {
+        command: "projects:set-enabled",
+        project: third,
+        enabled: subcommand === "enable",
       };
     }
     throw new Error(`Unknown projects command: ${subcommand}`);
@@ -457,6 +466,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.rotateProjectApiKey(invocation.projectId);
     case "projects:drain":
       return client.drainProject(invocation.project, invocation.options);
+    case "projects:set-enabled":
+      return client.setProjectEnabled(invocation.project, invocation.enabled);
     case "scheduler:status":
       return client.getSchedulerStatus(invocation.query);
     case "executors:list":
@@ -671,6 +682,8 @@ function helpText(): string {
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects rotate-key <project-id>
   agent-hub projects drain <project-name-or-id> [--cancel-running]
+  agent-hub projects enable <project-name-or-id>
+  agent-hub projects disable <project-name-or-id>
   agent-hub scheduler status [--agent-id <id>] [--project <project-id>]
   agent-hub executors list [--project <project-id>]
   agent-hub alerts list [--limit 20] [--include-acknowledged]

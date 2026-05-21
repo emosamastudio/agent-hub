@@ -116,9 +116,11 @@ Project-level stop switch:
 ```bash
 node packages/sdk/dist/cli.js projects drain oph
 node packages/sdk/dist/cli.js projects drain oph --cancel-running
+node packages/sdk/dist/cli.js projects enable oph
 ```
 
 The first command disables OPH agents and cancels queued work while allowing already running executions to finish. Use `--cancel-running` only when the running work itself must be interrupted.
+After maintenance, run `projects enable oph` to re-enable scheduling for the OPH agents.
 
 ## OPH Project Setup
 
