@@ -19,6 +19,7 @@ import {
   type AgentHubListExecutionsQuery,
   type AgentHubListExecutorsQuery,
   type AgentHubMisfirePolicy,
+  type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
   type AgentHubTriggerOptions,
@@ -66,7 +67,8 @@ type CliInvocation =
     agentName: string;
     triggerOptions: AgentHubTriggerOptions;
     waitOptions: AgentHubWaitExecutionOptions;
-  };
+  }
+  | { command: "canary:run"; agentName: string; options: AgentHubRunCanaryOptions };
 
 interface ParsedArgs {
   positionals: string[];
@@ -435,6 +437,25 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
     };
   }
 
+  if (root === "canary") {
+    if (subcommand !== "run" || !third) {
+      throw new Error("Usage: agent-hub canary run <agent-name> [--project <project-name-or-id>] [--payload '{...}']");
+    }
+    return {
+      command: "canary:run",
+      agentName: third,
+      options: compactDefined({
+        project: stringFlag(parsed.flags, "project"),
+        payload: parsePayload(stringFlag(parsed.flags, "payload")),
+        idempotencyKey: stringFlag(parsed.flags, "idempotency-key"),
+        dedupPolicy: parseDedupPolicy(stringFlag(parsed.flags, "dedup-policy")) ?? "allow_duplicate",
+        timeoutMs: numberFlag(parsed.flags, "timeout-ms"),
+        intervalMs: numberFlag(parsed.flags, "interval-ms"),
+        requireSuccess: parsed.flags["allow-terminal-failure"] === true ? false : true,
+      }),
+    };
+  }
+
   throw new Error(`Unknown command: ${root}`);
 }
 
@@ -523,6 +544,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.triggerAgent(invocation.agentName, invocation.options);
     case "trigger:wait":
       return client.triggerAgentAndWait(invocation.agentName, invocation.triggerOptions, invocation.waitOptions);
+    case "canary:run":
+      return client.runCanary(invocation.agentName, invocation.options);
     case "help":
       return {};
   }
@@ -719,6 +742,7 @@ function helpText(): string {
   agent-hub executions rerun <execution-id>
   agent-hub traces list <execution-id>
   agent-hub trigger <agent-name> [--payload '{"key":"value"}'] [--idempotency-key <key>] [--dedup-policy skip_if_running] [--wait] [--timeout-ms 600000] [--interval-ms 1000] [--require-success]
+  agent-hub canary run <agent-name> [--project <project-name-or-id>] [--payload '{"key":"value"}'] [--timeout-ms 600000] [--interval-ms 1000] [--allow-terminal-failure]
 
 Connection:
   --url <url>                         Defaults to AGENT_HUB_URL or ${DEFAULT_URL}

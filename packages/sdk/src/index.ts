@@ -165,6 +165,17 @@ export interface AgentHubTriggerAndWaitResult {
   execution: unknown;
 }
 
+export interface AgentHubRunCanaryOptions extends AgentHubTriggerOptions, AgentHubWaitExecutionOptions {
+  project?: string;
+}
+
+export interface AgentHubRunCanaryResult {
+  preflight: AgentHubDoctorReport;
+  trigger: AgentHubTriggerResult;
+  execution: unknown;
+  postflight: AgentHubDoctorReport;
+}
+
 export interface AgentHubSchedulerRuntimeMetrics {
   running: boolean;
   tick_ms: number;
@@ -345,6 +356,13 @@ function looksLikeDirectAgentId(value: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
+  const errors = report.checks
+    .filter((check) => check.status === 'error')
+    .map((check) => `${check.name}: ${check.message ?? 'error'}`);
+  return `Agent Hub canary ${stage} failed${errors.length > 0 ? `: ${errors.join('; ')}` : ''}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -713,6 +731,39 @@ export class AgentHubControlClient {
     return {
       trigger,
       execution: await this.waitForExecution(executionId, waitOptions),
+    };
+  }
+
+  async runCanary(
+    agentName: string,
+    options: AgentHubRunCanaryOptions = {},
+  ): Promise<AgentHubRunCanaryResult> {
+    const doctorOptions = options.project ? { project: options.project } : {};
+    const preflight = await this.doctor(doctorOptions);
+    if (!preflight.ok) {
+      throw new Error(doctorFailureMessage('preflight', preflight));
+    }
+
+    const run = await this.triggerAgentAndWait(agentName, {
+      payload: options.payload,
+      idempotencyKey: options.idempotencyKey,
+      dedupPolicy: options.dedupPolicy ?? 'allow_duplicate',
+    }, {
+      timeoutMs: options.timeoutMs,
+      intervalMs: options.intervalMs,
+      requireSuccess: options.requireSuccess ?? true,
+    });
+
+    const postflight = await this.doctor(doctorOptions);
+    if (!postflight.ok) {
+      throw new Error(doctorFailureMessage('postflight', postflight));
+    }
+
+    return {
+      preflight,
+      trigger: run.trigger,
+      execution: run.execution,
+      postflight,
     };
   }
 

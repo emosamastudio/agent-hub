@@ -104,6 +104,30 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses one-step canary run invocations", () => {
+    expect(parseCliInvocation([
+      "canary",
+      "run",
+      "enrich_repo",
+      "--project",
+      "oph",
+      "--payload",
+      "{\"repo_name\":\"agent-hub-smoke\"}",
+      "--timeout-ms",
+      "600000",
+    ])).toEqual({
+      command: "canary:run",
+      agentName: "enrich_repo",
+      options: {
+        project: "oph",
+        payload: { repo_name: "agent-hub-smoke" },
+        dedupPolicy: "allow_duplicate",
+        timeoutMs: 600000,
+        requireSuccess: true,
+      },
+    });
+  });
+
   test("parses execution cancel and rerun invocations", () => {
     expect(parseCliInvocation(["executions", "cancel", "exec-1"])).toEqual({
       command: "executions:cancel",

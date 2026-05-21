@@ -304,6 +304,10 @@ node packages/sdk/dist/cli.js trigger demo_agent \
   --wait \
   --timeout-ms 600000 \
   --require-success
+node packages/sdk/dist/cli.js canary run enrich_repo \
+  --project oph \
+  --payload '{"repo_name":"agent-hub-smoke"}' \
+  --timeout-ms 600000
 ```
 
 Project-scoped read commands such as `agents list`, `executors list`, and `scheduler status` accept project names or ids. Agent-level commands accept either an agent id or an agent name. When using names across multiple projects, pass `--project <name-or-id>` so the SDK resolves the active agent safely and rejects ambiguous matches. `agents drain` disables scheduling and executor polling for an agent, cancels queued executions, and only cancels running executions when `--cancel-running` is explicitly provided. `agents delete` and registry deregistration refuse agents that still have queued or running executions. Cancel or drain active work before deleting an agent. Once accepted, delete/deregister archives the agent, removes it from active dashboard/API lists, disables scheduling and executor polling for it, and preserves terminal execution/trace history for audit. Use `agents list --archived only` and `agents get --include-archived` to inspect archived agents and their retained history.
@@ -316,7 +320,9 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
-`trigger --wait` is the one-step canary form. It triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it for deployment smoke tests where copying an execution id by hand would be brittle.
+`trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
+
+`canary run` is the higher-level smoke path for coding agents. It runs `doctor` before the trigger, triggers the agent with `allow_duplicate` by default, waits with `requireSuccess=true` by default, then runs `doctor` again after the execution reaches success.
 
 `projects ensure` is the preferred setup command for consumer repositories. It returns an existing project by name without changing its API key, or creates the project and returns the one-time plaintext key when missing.
 
@@ -371,6 +377,7 @@ Exposed tools:
 - `agent_hub_list_traces`
 - `agent_hub_trigger_agent`
 - `agent_hub_trigger_and_wait_agent`
+- `agent_hub_run_canary`
 - `agent_hub_set_agent_enabled`
 - `agent_hub_cancel_execution`
 - `agent_hub_rerun_execution`

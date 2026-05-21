@@ -33,6 +33,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_list_traces",
       "agent_hub_trigger_agent",
       "agent_hub_trigger_and_wait_agent",
+      "agent_hub_run_canary",
       "agent_hub_set_agent_enabled",
       "agent_hub_cancel_execution",
       "agent_hub_rerun_execution",
@@ -446,6 +447,41 @@ describe("Agent Hub MCP tools", () => {
       timeoutMs: 60000,
       intervalMs: 250,
       requireSuccess: true,
+    });
+  });
+
+  test("canary tool runs diagnostics around a trigger-and-wait flow", async () => {
+    const runCanary = vi.fn(async () => ({
+      preflight: { ok: true },
+      trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+      execution: { id: "exec-1", status: "success" },
+      postflight: { ok: true },
+    }));
+    const tools = createAgentHubMcpTools({ runCanary } as any);
+    const canaryTool = tools.find((tool) => tool.name === "agent_hub_run_canary");
+
+    await expect(canaryTool?.handler({
+      agentName: "enrich_repo",
+      project: "oph",
+      payload: { repo_name: "agent-hub-smoke" },
+      timeoutMs: 600000,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            preflight: { ok: true },
+            trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+            execution: { id: "exec-1", status: "success" },
+            postflight: { ok: true },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(runCanary).toHaveBeenCalledWith("enrich_repo", {
+      project: "oph",
+      payload: { repo_name: "agent-hub-smoke" },
+      timeoutMs: 600000,
     });
   });
 

@@ -1436,6 +1436,78 @@ describe("AgentHubControlClient", () => {
     ]);
   });
 
+  test("runCanary checks diagnostics before and after a successful trigger", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input.toString();
+      requests.push(url);
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true }, alerts_active: 0 });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([{ id: "project-1", name: "oph", displayName: "Open Source Project Hunter" }]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "enrich_repo", executorStatus: "online" }]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([{ agent_name: "enrich_repo", executor_status: "online" }]);
+      }
+      if (url === "http://hub/api/alerts?limit=20") return jsonResponse([]);
+      if (url === "http://hub/api/agents/enrich_repo/trigger") {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(init?.body as string)).toEqual({
+          payload: { repo_name: "agent-hub-smoke" },
+          idempotency_key: undefined,
+          dedup_policy: "allow_duplicate",
+        });
+        return jsonResponse({ execution_id: "exec-1", status: "queued", duplicate: false }, { status: 202 });
+      }
+      if (url === "http://hub/api/executions/exec-1") {
+        return jsonResponse({ id: "exec-1", status: "success", resultSummary: "done" });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.runCanary("enrich_repo", {
+      project: "oph",
+      payload: { repo_name: "agent-hub-smoke" },
+      intervalMs: 0,
+      timeoutMs: 1000,
+    })).resolves.toMatchObject({
+      preflight: { ok: true, project: { name: "oph" } },
+      trigger: { execution_id: "exec-1", status: "queued", duplicate: false },
+      execution: { id: "exec-1", status: "success" },
+      postflight: { ok: true, project: { name: "oph" } },
+    });
+    expect(requests).toEqual([
+      "http://hub/api/health",
+      "http://hub/api/ready",
+      "http://hub/api/metrics",
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1",
+      "http://hub/api/executors?project=project-1",
+      "http://hub/api/alerts?limit=20",
+      "http://hub/api/agents/enrich_repo/trigger",
+      "http://hub/api/executions/exec-1",
+      "http://hub/api/health",
+      "http://hub/api/ready",
+      "http://hub/api/metrics",
+      "http://hub/api/projects",
+      "http://hub/api/agents?project=project-1",
+      "http://hub/api/executors?project=project-1",
+      "http://hub/api/alerts?limit=20",
+    ]);
+  });
+
   test("triggerAgentAndWait rejects if the trigger response lacks an execution id", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ status: "queued" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
