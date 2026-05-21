@@ -300,6 +300,34 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses MCP config generation invocations", () => {
+    expect(parseCliInvocation([
+      "mcp",
+      "config",
+      "--name",
+      "agent-hub-oph",
+      "--command",
+      "agent-hub-mcp",
+    ])).toEqual({
+      command: "mcp:config",
+      options: {
+        name: "agent-hub-oph",
+        command: "agent-hub-mcp",
+      },
+    });
+    expect(parseCliInvocation([
+      "mcp",
+      "config",
+      "--node-entry",
+      "packages/sdk/dist/mcp.js",
+    ])).toEqual({
+      command: "mcp:config",
+      options: {
+        nodeEntry: "packages/sdk/dist/mcp.js",
+      },
+    });
+  });
+
   test("parses agent enable and disable invocations", () => {
     expect(parseCliInvocation(["agents", "enable", "agent-1"])).toEqual({
       command: "agents:set-enabled",
@@ -464,6 +492,49 @@ describe("agent-hub CLI", () => {
       apiKey: "dev-key",
       dashboardUsername: "root",
       dashboardPassword: "secret",
+    });
+  });
+
+  test("prints MCP stdio config without contacting the hub", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("mcp config should not call fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    await expect(runCli([
+      "mcp",
+      "config",
+      "--name",
+      "agent-hub-oph",
+      "--node-entry",
+      "packages/sdk/dist/mcp.js",
+      "--url",
+      "http://hub",
+      "--api-key",
+      "agh_oph",
+      "--dashboard-user",
+      "ops",
+      "--dashboard-password",
+      "secret",
+    ], {}, { stdout, stderr })).resolves.toBe(0);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stderr.text).toBe("");
+    expect(JSON.parse(stdout.text)).toEqual({
+      mcpServers: {
+        "agent-hub-oph": {
+          command: "node",
+          args: ["packages/sdk/dist/mcp.js"],
+          env: {
+            AGENT_HUB_URL: "http://hub",
+            AGENT_HUB_API_KEY: "agh_oph",
+            AGENT_HUB_DASHBOARD_USER: "ops",
+            AGENT_HUB_DASHBOARD_PASSWORD: "secret",
+          },
+        },
+      },
     });
   });
 

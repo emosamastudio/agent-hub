@@ -36,6 +36,12 @@ interface CliOpsStatusOptions extends AgentHubOpsStatusOptions {
   strict?: boolean;
 }
 
+interface CliMcpConfigOptions {
+  name?: string;
+  command?: string;
+  nodeEntry?: string;
+}
+
 type CliInvocation =
   | { command: "help" }
   | { command: "health" }
@@ -49,6 +55,7 @@ type CliInvocation =
   | { command: "projects:rotate-key"; project: string }
   | { command: "projects:drain"; project: string; options: AgentHubDrainProjectOptions }
   | { command: "projects:set-enabled"; project: string; enabled: boolean }
+  | { command: "mcp:config"; options: CliMcpConfigOptions }
   | { command: "scheduler:status"; query: AgentHubSchedulerStatusQuery }
   | { command: "executors:list"; query: AgentHubListExecutorsQuery }
   | { command: "alerts:list"; query: AgentHubListAlertsQuery }
@@ -200,6 +207,20 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       };
     }
     throw new Error(`Unknown projects command: ${subcommand}`);
+  }
+
+  if (root === "mcp") {
+    if (!subcommand || subcommand === "config") {
+      return {
+        command: "mcp:config",
+        options: compactDefined({
+          name: stringFlag(parsed.flags, "name"),
+          command: stringFlag(parsed.flags, "command"),
+          nodeEntry: stringFlag(parsed.flags, "node-entry"),
+        }),
+      };
+    }
+    throw new Error(`Unknown mcp command: ${subcommand}`);
   }
 
   if (root === "scheduler") {
@@ -501,6 +522,11 @@ export async function runCli(
     }
 
     const { flags } = parseArgs(argv);
+    if (invocation.command === "mcp:config") {
+      io.stdout.write(`${JSON.stringify(buildMcpConfig(buildControlConfig(env, flags), invocation.options), null, 2)}\n`);
+      return 0;
+    }
+
     const client = new AgentHubControlClient(buildControlConfig(env, flags));
     const result = await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -523,6 +549,24 @@ function resultOk(result: unknown): boolean | undefined {
   if (!result || typeof result !== "object") return undefined;
   const ok = (result as { ok?: unknown }).ok;
   return typeof ok === "boolean" ? ok : undefined;
+}
+
+function buildMcpConfig(config: AgentHubControlConfig, options: CliMcpConfigOptions): unknown {
+  const name = options.name ?? "agent-hub";
+  return {
+    mcpServers: {
+      [name]: {
+        command: options.nodeEntry ? "node" : options.command ?? "agent-hub-mcp",
+        args: options.nodeEntry ? [options.nodeEntry] : [],
+        env: {
+          AGENT_HUB_URL: config.serverUrl,
+          AGENT_HUB_API_KEY: config.apiKey,
+          AGENT_HUB_DASHBOARD_USER: config.dashboardUsername,
+          AGENT_HUB_DASHBOARD_PASSWORD: config.dashboardPassword,
+        },
+      },
+    },
+  };
 }
 
 async function executeInvocation(client: AgentHubControlClient, invocation: CliInvocation): Promise<unknown> {
@@ -549,6 +593,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.drainProject(invocation.project, invocation.options);
     case "projects:set-enabled":
       return client.setProjectEnabled(invocation.project, invocation.enabled);
+    case "mcp:config":
+      return {};
     case "scheduler:status":
       return client.getSchedulerStatus(invocation.query);
     case "executors:list":
@@ -770,6 +816,7 @@ function helpText(): string {
   agent-hub projects drain <project-name-or-id> [--cancel-running]
   agent-hub projects enable <project-name-or-id>
   agent-hub projects disable <project-name-or-id>
+  agent-hub mcp config [--name agent-hub] [--command agent-hub-mcp] [--node-entry packages/sdk/dist/mcp.js]
   agent-hub scheduler status [--agent-id <id>] [--project <project-name-or-id>]
   agent-hub executors list [--project <project-name-or-id>]
   agent-hub alerts list [--limit 20] [--include-acknowledged]

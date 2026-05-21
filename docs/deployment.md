@@ -151,6 +151,18 @@ If the project already exists and the plaintext key is lost, rotate it:
 node packages/sdk/dist/cli.js projects rotate-key oph
 ```
 
+Generate MCP config for coding agents that should operate Agent Hub directly:
+
+```bash
+node packages/sdk/dist/cli.js mcp config \
+  --name agent-hub-oph \
+  --node-entry packages/sdk/dist/mcp.js \
+  --url "$AGENT_HUB_URL" \
+  --api-key "$AGENT_HUB_API_KEY" \
+  --dashboard-user "$AGENT_HUB_DASHBOARD_USER" \
+  --dashboard-password "$AGENT_HUB_DASHBOARD_PASSWORD"
+```
+
 ## Smoke Test
 
 After OPH registers its executor agents:

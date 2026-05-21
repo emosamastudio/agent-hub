@@ -265,6 +265,7 @@ node packages/sdk/dist/cli.js projects rotate-key oph
 node packages/sdk/dist/cli.js projects drain oph --cancel-running
 node packages/sdk/dist/cli.js projects disable oph
 node packages/sdk/dist/cli.js projects enable oph
+node packages/sdk/dist/cli.js mcp config --name agent-hub-oph --node-entry packages/sdk/dist/mcp.js
 node packages/sdk/dist/cli.js scheduler status --project oph
 node packages/sdk/dist/cli.js agents list --project oph --status online
 node packages/sdk/dist/cli.js agents list --archived only
@@ -355,6 +356,24 @@ The same SDK package also builds a stdio MCP server for MCP-capable coding agent
 ```bash
 npm run build -w @agent-hub/sdk
 npm run hub:mcp
+```
+
+Generate a pasteable MCP stdio config for an agent runtime:
+
+```bash
+node packages/sdk/dist/cli.js mcp config \
+  --name agent-hub-oph \
+  --node-entry packages/sdk/dist/mcp.js \
+  --url http://127.0.0.1:8788 \
+  --api-key "$AGENT_HUB_API_KEY" \
+  --dashboard-user "$AGENT_HUB_DASHBOARD_USER" \
+  --dashboard-password "$AGENT_HUB_DASHBOARD_PASSWORD"
+```
+
+If the SDK package is installed on `PATH`, use the package binary instead:
+
+```bash
+agent-hub mcp config --name agent-hub-oph --command agent-hub-mcp
 ```
 
 Exposed tools:
