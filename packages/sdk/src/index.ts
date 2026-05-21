@@ -167,6 +167,12 @@ export interface AgentHubTriggerAndWaitResult {
   execution: unknown;
 }
 
+export interface AgentHubInspectExecutionResult {
+  execution: unknown;
+  traces: unknown[];
+  triggerChain: unknown[];
+}
+
 export interface AgentHubRunCanaryOptions extends AgentHubTriggerOptions, AgentHubWaitExecutionOptions {
   project?: string;
 }
@@ -787,6 +793,17 @@ export class AgentHubControlClient {
     return this.requestJson('GET', `/api/executions/${encodeURIComponent(id)}`, undefined, 'dashboard');
   }
 
+  async inspectExecution(executionId: string): Promise<AgentHubInspectExecutionResult> {
+    const execution = await this.getExecution(executionId);
+    const traces = await this.getExecutionTraces(executionId);
+    const triggerChain = await this.getExecutionTriggerChain(executionId);
+    return {
+      execution,
+      traces,
+      triggerChain,
+    };
+  }
+
   async waitForExecution(
     executionId: string,
     options: AgentHubWaitExecutionOptions = {},
@@ -815,6 +832,10 @@ export class AgentHubControlClient {
 
   async getExecutionTraces(executionId: string): Promise<unknown[]> {
     return this.requestJson('GET', `/api/executions/${encodeURIComponent(executionId)}/traces`, undefined, 'dashboard');
+  }
+
+  async getExecutionTriggerChain(executionId: string): Promise<unknown[]> {
+    return this.requestJson('GET', `/api/executions/${encodeURIComponent(executionId)}/trigger-chain`, undefined, 'dashboard');
   }
 
   async triggerAgent(agentName: string, options: AgentHubTriggerOptions = {}): Promise<AgentHubTriggerResult> {

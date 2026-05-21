@@ -107,6 +107,7 @@ node packages/sdk/dist/cli.js agents list --project oph
 node packages/sdk/dist/cli.js executors list --project oph
 node packages/sdk/dist/cli.js executions list --project oph --status queued --limit 20
 node packages/sdk/dist/cli.js executions list --project oph --status running --limit 20
+node packages/sdk/dist/cli.js executions inspect <failed-or-timeout-execution-id>
 node packages/sdk/dist/cli.js alerts list --limit 20
 ```
 

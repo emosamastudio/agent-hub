@@ -395,6 +395,14 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       handler: async (args) => toMcpText(await client.getExecution(args.executionId as string)),
     },
     {
+      name: "agent_hub_inspect_execution",
+      description: "Get an execution diagnostic bundle with detail, trace spans, and trigger-chain context.",
+      inputSchema: {
+        executionId: z.string().min(1),
+      },
+      handler: async (args) => toMcpText(await client.inspectExecution(args.executionId as string)),
+    },
+    {
       name: "agent_hub_wait_execution",
       description: "Poll one execution until it reaches success, failed, timeout, or cancelled.",
       inputSchema: {

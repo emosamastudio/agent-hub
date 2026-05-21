@@ -155,6 +155,10 @@ describe("agent-hub CLI", () => {
   });
 
   test("parses execution cancel and rerun invocations", () => {
+    expect(parseCliInvocation(["executions", "inspect", "exec-1"])).toEqual({
+      command: "executions:inspect",
+      executionId: "exec-1",
+    });
     expect(parseCliInvocation(["executions", "cancel", "exec-1"])).toEqual({
       command: "executions:cancel",
       executionId: "exec-1",

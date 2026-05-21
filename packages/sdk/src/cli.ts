@@ -63,6 +63,7 @@ type CliInvocation =
   | { command: "agents:drain"; agentId: string; options: AgentHubDrainAgentOptions }
   | { command: "executions:list"; query: AgentHubListExecutionsQuery }
   | { command: "executions:get"; executionId: string }
+  | { command: "executions:inspect"; executionId: string }
   | { command: "executions:wait"; executionId: string; options: AgentHubWaitExecutionOptions }
   | { command: "executions:cancel"; executionId: string }
   | { command: "executions:rerun"; executionId: string }
@@ -404,6 +405,10 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       if (!third) throw new Error("Usage: agent-hub executions get <execution-id>");
       return { command: "executions:get", executionId: third };
     }
+    if (subcommand === "inspect") {
+      if (!third) throw new Error("Usage: agent-hub executions inspect <execution-id>");
+      return { command: "executions:inspect", executionId: third };
+    }
     if (subcommand === "wait") {
       if (!third) throw new Error("Usage: agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000]");
       return {
@@ -571,6 +576,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.listExecutions(invocation.query);
     case "executions:get":
       return client.getExecution(invocation.executionId);
+    case "executions:inspect":
+      return client.inspectExecution(invocation.executionId);
     case "executions:wait":
       return client.waitForExecution(invocation.executionId, invocation.options);
     case "executions:cancel":
@@ -777,6 +784,7 @@ function helpText(): string {
   agent-hub agents delete <agent-id-or-name> [--project <project-name-or-id>]
   agent-hub executions list [--project <project-name-or-id>] [--agent <agent-id-or-name>] [--agent-id <id>] [--status queued] [--trigger-type api] [--limit 50] [--offset 0]
   agent-hub executions get <execution-id>
+  agent-hub executions inspect <execution-id>
   agent-hub executions wait <execution-id> [--timeout-ms 600000] [--interval-ms 1000] [--require-success]
   agent-hub executions cancel <execution-id>
   agent-hub executions rerun <execution-id>

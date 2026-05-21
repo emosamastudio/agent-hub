@@ -2008,6 +2008,48 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("inspectExecution combines execution detail, traces, and trigger chain", async () => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(input.toString());
+      expect(init?.method).toBe("GET");
+      expect(init?.headers).toMatchObject({
+        Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
+        "Agent-Hub-Version": "1",
+      });
+
+      if (input.toString() === "http://hub/api/executions/exec-1") {
+        return jsonResponse({ id: "exec-1", status: "failed", errorMessage: "boom" });
+      }
+      if (input.toString() === "http://hub/api/executions/exec-1/traces") {
+        return jsonResponse([{ id: "trace-1", spanType: "log", outputContent: "before failure" }]);
+      }
+      if (input.toString() === "http://hub/api/executions/exec-1/trigger-chain") {
+        return jsonResponse([{ id: "exec-parent", relation: "ancestor" }]);
+      }
+      throw new Error(`Unexpected request: ${input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.inspectExecution("exec-1")).resolves.toEqual({
+      execution: { id: "exec-1", status: "failed", errorMessage: "boom" },
+      traces: [{ id: "trace-1", spanType: "log", outputContent: "before failure" }],
+      triggerChain: [{ id: "exec-parent", relation: "ancestor" }],
+    });
+    expect(requests).toEqual([
+      "http://hub/api/executions/exec-1",
+      "http://hub/api/executions/exec-1/traces",
+      "http://hub/api/executions/exec-1/trigger-chain",
+    ]);
+  });
+
   test("waitForExecution polls until the execution reaches a terminal status", async () => {
     const requests: string[] = [];
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
