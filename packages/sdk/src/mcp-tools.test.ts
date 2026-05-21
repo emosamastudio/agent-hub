@@ -206,7 +206,7 @@ describe("Agent Hub MCP tools", () => {
       ],
     });
     await expect(tools.find((tool) => tool.name === "agent_hub_rotate_project_api_key")?.handler({
-      projectId: "project-1",
+      project: "oph",
     })).resolves.toEqual({
       content: [
         {
@@ -224,7 +224,7 @@ describe("Agent Hub MCP tools", () => {
       displayName: "Open Source Project Hunter",
       description: "OPH executor integration",
     });
-    expect(rotateProjectApiKey).toHaveBeenCalledWith("project-1");
+    expect(rotateProjectApiKey).toHaveBeenCalledWith("oph");
   });
 
   test("project drain tool forwards project name and cancellation options", async () => {

@@ -294,9 +294,9 @@ describe("agent-hub CLI", () => {
         description: "OPH executor integration",
       },
     });
-    expect(parseCliInvocation(["projects", "rotate-key", "project-1"])).toEqual({
+    expect(parseCliInvocation(["projects", "rotate-key", "oph"])).toEqual({
       command: "projects:rotate-key",
-      projectId: "project-1",
+      project: "oph",
     });
   });
 

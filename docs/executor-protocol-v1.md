@@ -43,15 +43,15 @@ github.com/emosamastudio/agent-hub/sdks/go/agenthub
 Production consumers should use a tagged version:
 
 ```go
-require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.2.0
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.3.0
 ```
 
 Because the SDK is a nested Go module, the matching git tag must be created with
 the module directory prefix:
 
 ```bash
-git tag sdks/go/agenthub/v0.2.0
-git push origin sdks/go/agenthub/v0.2.0
+git tag sdks/go/agenthub/v0.3.0
+git push origin sdks/go/agenthub/v0.3.0
 ```
 
 Local source integration can use a temporary replace:
@@ -60,10 +60,11 @@ Local source integration can use a temporary replace:
 replace github.com/emosamastudio/agent-hub/sdks/go/agenthub => ../agent-hub/sdks/go/agenthub
 ```
 
-`v0.2.0` is the first Go SDK tag compatible with Agent Hub servers that require
-agent descriptions during registry sync. Consumers using `v0.1.0` must upgrade
-before syncing agents against this protocol version, otherwise registrations
-without `description` will be rejected with field-level validation details.
+`v0.3.0` is the current Go SDK tag for this protocol. It includes protocol
+version headers, required agent descriptions, and local handler validation
+before registry sync. Consumers using `v0.1.0` must upgrade before syncing
+agents against this protocol version, otherwise registrations without
+`description` will be rejected with field-level validation details.
 
 ## Project Setup
 
@@ -101,7 +102,7 @@ AGENT_HUB_API_KEY=agh_...
 Rotate the key:
 
 ```bash
-node packages/sdk/dist/cli.js projects rotate-key <project-id>
+node packages/sdk/dist/cli.js projects rotate-key oph
 ```
 
 ## Stable Endpoints

@@ -177,7 +177,7 @@ execution reporting.
 Production consumers should pin the tagged nested module:
 
 ```go
-require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.2.0
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.3.0
 ```
 
 ```go
@@ -261,7 +261,7 @@ node packages/sdk/dist/cli.js projects ensure oph \
 node packages/sdk/dist/cli.js projects create oph \
   --display-name "Open Source Project Hunter" \
   --description "OPH executor integration"
-node packages/sdk/dist/cli.js projects rotate-key <project-id>
+node packages/sdk/dist/cli.js projects rotate-key oph
 node packages/sdk/dist/cli.js projects drain oph --cancel-running
 node packages/sdk/dist/cli.js projects disable oph
 node packages/sdk/dist/cli.js projects enable oph
@@ -383,6 +383,7 @@ Exposed tools:
 - `agent_hub_drain_agent`
 - `agent_hub_list_executions`
 - `agent_hub_get_execution`
+- `agent_hub_inspect_execution`
 - `agent_hub_wait_execution`
 - `agent_hub_list_traces`
 - `agent_hub_trigger_agent`

@@ -46,7 +46,7 @@ type CliInvocation =
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
-  | { command: "projects:rotate-key"; projectId: string }
+  | { command: "projects:rotate-key"; project: string }
   | { command: "projects:drain"; project: string; options: AgentHubDrainProjectOptions }
   | { command: "projects:set-enabled"; project: string; enabled: boolean }
   | { command: "scheduler:status"; query: AgentHubSchedulerStatusQuery }
@@ -175,10 +175,10 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       };
     }
     if (subcommand === "rotate-key") {
-      if (!third) throw new Error("Usage: agent-hub projects rotate-key <project-id>");
+      if (!third) throw new Error("Usage: agent-hub projects rotate-key <project-name-or-id>");
       return {
         command: "projects:rotate-key",
-        projectId: third,
+        project: third,
       };
     }
     if (subcommand === "drain") {
@@ -544,7 +544,7 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
     case "projects:create":
       return client.createProject(invocation.input);
     case "projects:rotate-key":
-      return client.rotateProjectApiKey(invocation.projectId);
+      return client.rotateProjectApiKey(invocation.project);
     case "projects:drain":
       return client.drainProject(invocation.project, invocation.options);
     case "projects:set-enabled":
@@ -766,7 +766,7 @@ function helpText(): string {
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
-  agent-hub projects rotate-key <project-id>
+  agent-hub projects rotate-key <project-name-or-id>
   agent-hub projects drain <project-name-or-id> [--cancel-running]
   agent-hub projects enable <project-name-or-id>
   agent-hub projects disable <project-name-or-id>

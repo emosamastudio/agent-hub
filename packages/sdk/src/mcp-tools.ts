@@ -119,11 +119,16 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
     },
     {
       name: "agent_hub_rotate_project_api_key",
-      description: "Rotate a project's executor API key and return the new one-time plaintext key.",
+      description: "Rotate a project's executor API key by project name or id and return the new one-time plaintext key.",
       inputSchema: {
-        projectId: z.string().min(1),
+        project: z.string().min(1).optional(),
+        projectId: z.string().min(1).optional(),
       },
-      handler: async (args) => toMcpText(await client.rotateProjectApiKey(args.projectId as string)),
+      handler: async (args) => {
+        const project = stringArg(args.project) ?? stringArg(args.projectId);
+        if (!project) throw new Error("project is required");
+        return toMcpText(await client.rotateProjectApiKey(project));
+      },
     },
     {
       name: "agent_hub_drain_project",

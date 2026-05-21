@@ -148,7 +148,7 @@ AGENT_HUB_API_KEY=<oph-project-key>
 If the project already exists and the plaintext key is lost, rotate it:
 
 ```bash
-node packages/sdk/dist/cli.js projects rotate-key <oph-project-id>
+node packages/sdk/dist/cli.js projects rotate-key oph
 ```
 
 ## Smoke Test

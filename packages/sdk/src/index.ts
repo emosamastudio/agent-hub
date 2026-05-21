@@ -698,10 +698,11 @@ export class AgentHubControlClient {
     };
   }
 
-  async rotateProjectApiKey(projectId: string): Promise<unknown> {
+  async rotateProjectApiKey(project: string): Promise<unknown> {
+    const targetProject = await this.resolveProject(project);
     return this.requestJson(
       'POST',
-      `/api/projects/${encodeURIComponent(projectId)}/api-key`,
+      `/api/projects/${encodeURIComponent(targetProject.id)}/api-key`,
       undefined,
       'dashboard',
     );

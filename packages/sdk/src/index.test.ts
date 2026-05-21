@@ -1092,11 +1092,11 @@ describe("AgentHubControlClient", () => {
     });
   });
 
-  test("createProject and rotateProjectApiKey manage project-bound API keys", async () => {
+  test("createProject and rotateProjectApiKey manage project-bound API keys by project name", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       requests.push({ url: input.toString(), init });
-      if (input.toString() === "http://hub/api/projects") {
+      if (input.toString() === "http://hub/api/projects" && init?.method === "POST") {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(init?.body as string)).toEqual({
           name: "oph",
@@ -1107,6 +1107,11 @@ describe("AgentHubControlClient", () => {
           project: { id: "project-1", name: "oph" },
           api_key: "agh_created",
         }, { status: 201 });
+      }
+      if (input.toString() === "http://hub/api/projects" && init?.method === "GET") {
+        return jsonResponse([
+          { id: "project-1", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
       }
       if (input.toString() === "http://hub/api/projects/project-1/api-key") {
         expect(init?.method).toBe("POST");
@@ -1135,7 +1140,7 @@ describe("AgentHubControlClient", () => {
       project: { id: "project-1", name: "oph" },
       api_key: "agh_created",
     });
-    await expect(client.rotateProjectApiKey("project-1")).resolves.toEqual({
+    await expect(client.rotateProjectApiKey("oph")).resolves.toEqual({
       project: { id: "project-1", name: "oph" },
       api_key: "agh_rotated",
     });
@@ -1144,6 +1149,10 @@ describe("AgentHubControlClient", () => {
       "Agent-Hub-Version": "1",
     });
     expect(requests[1].init?.headers).toMatchObject({
+      Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
+      "Agent-Hub-Version": "1",
+    });
+    expect(requests[2].init?.headers).toMatchObject({
       Authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
       "Agent-Hub-Version": "1",
     });
