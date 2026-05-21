@@ -14,6 +14,7 @@ import {
   type AgentHubListAlertsQuery,
   type AgentHubListExecutionsQuery,
   type AgentHubListExecutorsQuery,
+  type AgentHubOpsStatusOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
@@ -61,6 +62,18 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       handler: async (args) => toMcpText(await client.doctor(compact({
         project: stringArg(args.project),
       }) as AgentHubDoctorOptions)),
+    },
+    {
+      name: "agent_hub_get_ops_status",
+      description: "Read a project-scoped operational status snapshot for agent-driven deployment checks and observation.",
+      inputSchema: {
+        project: z.string().optional(),
+        alertLimit: z.number().int().min(1).optional(),
+      },
+      handler: async (args) => toMcpText(await client.getOpsStatus(compactDefined({
+        project: stringArg(args.project),
+        alertLimit: numberArg(args.alertLimit),
+      }) as AgentHubOpsStatusOptions)),
     },
     {
       name: "agent_hub_list_projects",

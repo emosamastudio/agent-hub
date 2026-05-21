@@ -247,6 +247,39 @@ export interface AgentHubDoctorReport {
   alerts?: unknown[];
 }
 
+export interface AgentHubOpsStatusOptions {
+  project?: string;
+  alertLimit?: number;
+}
+
+export interface AgentHubOpsStatusSummary {
+  errors: number;
+  warnings: number;
+  schedulerRunning: boolean | null;
+  agentsTotal: number;
+  agentsOnline: number;
+  executorsOnline: number;
+  activeAlerts: number;
+  executionsQueued: number | null;
+  executionsRunning: number | null;
+  executionsFailed: number | null;
+  executionsTimeout: number | null;
+}
+
+export interface AgentHubOpsStatusReport {
+  ok: boolean;
+  generatedAt: string;
+  serverUrl: string;
+  project?: AgentHubDoctorReport["project"];
+  summary: AgentHubOpsStatusSummary;
+  doctor: AgentHubDoctorReport;
+  metrics?: unknown;
+  scheduler?: unknown;
+  agents: unknown[];
+  executors: unknown[];
+  alerts: unknown[];
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -356,6 +389,28 @@ function looksLikeDirectAgentId(value: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function numberRecordField(record: unknown, key: string): number | null {
+  const value = objectRecord(record)?.[key];
+  return typeof value === 'number' ? value : null;
+}
+
+function schedulerRunningMetric(metrics: unknown): boolean | null {
+  const scheduler = objectRecord(objectRecord(metrics)?.scheduler);
+  const running = scheduler?.running;
+  return typeof running === 'boolean' ? running : null;
+}
+
+function countOnlineRecords(records: unknown[], fields: string[]): number {
+  return records.filter((record) => {
+    const object = objectRecord(record);
+    return object ? fields.some((field) => object[field] === 'online') : false;
+  }).length;
 }
 
 function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
@@ -509,6 +564,54 @@ export class AgentHubControlClient {
     };
     report.ok = report.summary.errors === 0;
     return report;
+  }
+
+  async getOpsStatus(options: AgentHubOpsStatusOptions = {}): Promise<AgentHubOpsStatusReport> {
+    const doctor = await this.doctor(options.project ? { project: options.project } : {});
+    const projectId = doctor.project?.found ? doctor.project.id : undefined;
+    const projectQuery = projectId ? { project: projectId } : {};
+
+    let scheduler: unknown;
+    let agents: unknown[] = [];
+    let executors: unknown[] = [];
+    if (!options.project || projectId) {
+      scheduler = await this.requestJson(
+        'GET',
+        this.pathWithQuery('/api/scheduler/status', projectQuery),
+        undefined,
+        'dashboard',
+      );
+      agents = await this.listAgentsByProjectId(projectQuery);
+      executors = await this.listExecutorsByProjectId(projectQuery);
+    }
+    const alerts = await this.listAlerts({ limit: options.alertLimit ?? 20 });
+    const metrics = doctor.metrics;
+
+    return {
+      ok: doctor.ok,
+      generatedAt: new Date().toISOString(),
+      serverUrl: this.config.serverUrl,
+      project: doctor.project,
+      summary: {
+        errors: doctor.summary.errors,
+        warnings: doctor.summary.warnings,
+        schedulerRunning: schedulerRunningMetric(metrics),
+        agentsTotal: agents.length,
+        agentsOnline: countOnlineRecords(agents, ['executorStatus', 'executor_status', 'status']),
+        executorsOnline: countOnlineRecords(executors, ['executorStatus', 'executor_status', 'status']),
+        activeAlerts: alerts.length,
+        executionsQueued: numberRecordField(metrics, 'executions_queued'),
+        executionsRunning: numberRecordField(metrics, 'executions_running'),
+        executionsFailed: numberRecordField(metrics, 'executions_failed'),
+        executionsTimeout: numberRecordField(metrics, 'executions_timeout'),
+      },
+      doctor,
+      metrics,
+      scheduler,
+      agents,
+      executors,
+      alerts,
+    };
   }
 
   async listProjects(): Promise<unknown[]> {

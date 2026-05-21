@@ -19,6 +19,7 @@ import {
   type AgentHubListExecutionsQuery,
   type AgentHubListExecutorsQuery,
   type AgentHubMisfirePolicy,
+  type AgentHubOpsStatusOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
@@ -37,6 +38,7 @@ type CliInvocation =
   | { command: "ready" }
   | { command: "metrics" }
   | { command: "doctor"; options: AgentHubDoctorOptions }
+  | { command: "ops:status"; options: AgentHubOpsStatusOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -121,6 +123,19 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         project: stringFlag(parsed.flags, "project"),
       }),
     };
+  }
+
+  if (root === "ops") {
+    if (!subcommand || subcommand === "status") {
+      return {
+        command: "ops:status",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
+        }),
+      };
+    }
+    throw new Error(`Unknown ops command: ${subcommand}`);
   }
 
   if (root === "projects") {
@@ -492,6 +507,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.getMetrics();
     case "doctor":
       return client.doctor(invocation.options);
+    case "ops:status":
+      return client.getOpsStatus(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -715,6 +732,7 @@ function helpText(): string {
   agent-hub ready
   agent-hub metrics
   agent-hub doctor [--project <project-name-or-id>]
+  agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

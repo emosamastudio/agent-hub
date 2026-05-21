@@ -27,6 +27,23 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses ops status snapshots", () => {
+    expect(parseCliInvocation([
+      "ops",
+      "status",
+      "--project",
+      "oph",
+      "--alert-limit",
+      "5",
+    ])).toEqual({
+      command: "ops:status",
+      options: {
+        project: "oph",
+        alertLimit: 5,
+      },
+    });
+  });
+
   test("parses project drain invocations", () => {
     expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
       command: "projects:drain",

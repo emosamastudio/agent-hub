@@ -10,6 +10,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_ready",
       "agent_hub_get_metrics",
       "agent_hub_doctor",
+      "agent_hub_get_ops_status",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -94,6 +95,35 @@ describe("Agent Hub MCP tools", () => {
       ],
     });
     expect(getMetrics).toHaveBeenCalledWith();
+  });
+
+  test("ops status tool reads the project operational snapshot", async () => {
+    const getOpsStatus = vi.fn(async () => ({
+      ok: true,
+      project: { requested: "oph", found: true, id: "project-1", name: "oph" },
+      summary: { errors: 0, warnings: 1, agentsTotal: 2, executorsOnline: 1 },
+    }));
+    const tools = createAgentHubMcpTools({ getOpsStatus } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_get_ops_status")?.handler({
+      project: "oph",
+      alertLimit: 5,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            project: { requested: "oph", found: true, id: "project-1", name: "oph" },
+            summary: { errors: 0, warnings: 1, agentsTotal: 2, executorsOnline: 1 },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(getOpsStatus).toHaveBeenCalledWith({
+      project: "oph",
+      alertLimit: 5,
+    });
   });
 
   test("project list tool reads sanitized project records", async () => {

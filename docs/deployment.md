@@ -100,6 +100,7 @@ During the first 24 hours after deployment, check at least these fields every ho
 Useful operator loop:
 
 ```bash
+node packages/sdk/dist/cli.js ops status --project oph
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js scheduler status
 node packages/sdk/dist/cli.js agents list
@@ -155,6 +156,7 @@ After OPH registers its executor agents:
 
 ```bash
 node packages/sdk/dist/cli.js doctor --project oph
+node packages/sdk/dist/cli.js ops status --project oph
 node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js scheduler status --project oph
 node packages/sdk/dist/cli.js agents list --project oph
