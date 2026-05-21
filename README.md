@@ -253,6 +253,7 @@ node packages/sdk/dist/cli.js ready
 node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning --execution-limit 5
+node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interval-ms 3600000 --strict --fail-on-warning --execution-limit 5
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -328,6 +329,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `ops status --project <name-or-id>` returns the higher-level operations snapshot for coding agents. It includes the doctor report, metrics, detailed scheduler state, project-scoped agents, executor heartbeats, active alerts, queued/running/failed/timeout execution samples, and a compact summary with queue, failure, online-agent, and alert counts. Add `--strict` when using it as a deployment gate; the CLI still prints the JSON snapshot, but exits non-zero if the snapshot reports `ok: false`. Add `--fail-on-warning` when active alerts, missing executors, or scheduler warnings should also fail the gate. Use `--execution-limit <n>` to control how many execution samples are returned per status bucket.
 
+`ops observe --project <name-or-id>` runs repeated `ops status` snapshots and returns a JSON report with `iterations`, `failedIterations`, and `snapshots`. For a 24-hour OPH observation window, use `--iterations 24 --interval-ms 3600000 --strict --fail-on-warning`; the command prints the full observation report and exits non-zero if any snapshot is unhealthy.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
@@ -383,6 +386,7 @@ Exposed tools:
 - `agent_hub_get_metrics`
 - `agent_hub_doctor`
 - `agent_hub_get_ops_status`
+- `agent_hub_observe_ops_status`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

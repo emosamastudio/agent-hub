@@ -262,6 +262,11 @@ export interface AgentHubOpsStatusOptions {
   failOnWarning?: boolean;
 }
 
+export interface AgentHubObserveOpsStatusOptions extends AgentHubOpsStatusOptions {
+  iterations?: number;
+  intervalMs?: number;
+}
+
 export interface AgentHubOpsStatusSummary {
   errors: number;
   warnings: number;
@@ -294,6 +299,15 @@ export interface AgentHubOpsStatusReport {
     timeout: unknown[];
   };
   alerts: unknown[];
+}
+
+export interface AgentHubObserveOpsStatusReport {
+  ok: boolean;
+  startedAt: string;
+  finishedAt: string;
+  iterations: number;
+  failedIterations: number;
+  snapshots: AgentHubOpsStatusReport[];
 }
 
 export interface AgentHubDrainAgentResult {
@@ -433,6 +447,16 @@ function positiveIntegerOr(value: number | undefined, fallback: number): number 
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.trunc(value)
     : fallback;
+}
+
+function nonNegativeIntegerOr(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : fallback;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
@@ -671,6 +695,35 @@ export class AgentHubControlClient {
       executors,
       executions,
       alerts,
+    };
+  }
+
+  async observeOpsStatus(options: AgentHubObserveOpsStatusOptions = {}): Promise<AgentHubObserveOpsStatusReport> {
+    const iterations = positiveIntegerOr(options.iterations, 24);
+    const intervalMs = nonNegativeIntegerOr(options.intervalMs, 60 * 60 * 1000);
+    const startedAt = new Date().toISOString();
+    const snapshots: AgentHubOpsStatusReport[] = [];
+
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      snapshots.push(await this.getOpsStatus({
+        project: options.project,
+        alertLimit: options.alertLimit,
+        executionLimit: options.executionLimit,
+        failOnWarning: options.failOnWarning,
+      }));
+      if (iteration < iterations - 1 && intervalMs > 0) {
+        await delay(intervalMs);
+      }
+    }
+
+    const failedIterations = snapshots.filter((snapshot) => !snapshot.ok).length;
+    return {
+      ok: failedIterations === 0,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      iterations,
+      failedIterations,
+      snapshots,
     };
   }
 

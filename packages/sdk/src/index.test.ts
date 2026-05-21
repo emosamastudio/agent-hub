@@ -1058,6 +1058,68 @@ describe("AgentHubControlClient", () => {
     });
   });
 
+  test("observeOpsStatus records repeated status snapshots and failed iterations", async () => {
+    let metricsCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") {
+        metricsCalls += 1;
+        return jsonResponse({ scheduler: { running: true }, alerts_active: metricsCalls === 1 ? 1 : 0 });
+      }
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([{ id: "project-1", name: "oph", displayName: "Open Source Project Hunter" }]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "enrich_repo", executorStatus: "online" }]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([{ agent_name: "enrich_repo", executor_status: "online" }]);
+      }
+      if (url === "http://hub/api/scheduler/status?project=project-1") {
+        return jsonResponse({ runtime: { running: true }, agents: [] });
+      }
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/alerts?limit=20") {
+        return jsonResponse(metricsCalls === 1 ? [{ id: 7, ruleName: "failed_runs" }] : []);
+      }
+      if (url === "http://hub/api/alerts?limit=4") {
+        return jsonResponse(metricsCalls === 1 ? [{ id: 7, ruleName: "failed_runs" }] : []);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.observeOpsStatus({
+      project: "oph",
+      iterations: 2,
+      intervalMs: 0,
+      alertLimit: 4,
+      executionLimit: 2,
+      failOnWarning: true,
+    })).resolves.toMatchObject({
+      ok: false,
+      iterations: 2,
+      failedIterations: 1,
+      snapshots: [
+        { ok: false, summary: { warnings: 1 } },
+        { ok: true, summary: { warnings: 0 } },
+      ],
+    });
+    expect(metricsCalls).toBe(2);
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();

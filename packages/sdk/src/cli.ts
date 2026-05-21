@@ -19,6 +19,7 @@ import {
   type AgentHubListExecutionsQuery,
   type AgentHubListExecutorsQuery,
   type AgentHubMisfirePolicy,
+  type AgentHubObserveOpsStatusOptions,
   type AgentHubOpsStatusOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
@@ -36,6 +37,10 @@ interface CliOpsStatusOptions extends AgentHubOpsStatusOptions {
   strict?: boolean;
 }
 
+interface CliOpsObserveOptions extends AgentHubObserveOpsStatusOptions {
+  strict?: boolean;
+}
+
 interface CliMcpConfigOptions {
   name?: string;
   command?: string;
@@ -49,6 +54,7 @@ type CliInvocation =
   | { command: "metrics" }
   | { command: "doctor"; options: AgentHubDoctorOptions }
   | { command: "ops:status"; options: CliOpsStatusOptions }
+  | { command: "ops:observe"; options: CliOpsObserveOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -145,6 +151,20 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
           project: stringFlag(parsed.flags, "project"),
           alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
           executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+          strict: parsed.flags.strict === true ? true : undefined,
+          failOnWarning: parsed.flags["fail-on-warning"] === true ? true : undefined,
+        }),
+      };
+    }
+    if (subcommand === "observe") {
+      return {
+        command: "ops:observe",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+          iterations: positiveNumberFlag(parsed.flags, "iterations"),
+          intervalMs: numberFlag(parsed.flags, "interval-ms"),
           strict: parsed.flags.strict === true ? true : undefined,
           failOnWarning: parsed.flags["fail-on-warning"] === true ? true : undefined,
         }),
@@ -531,7 +551,7 @@ export async function runCli(
     const result = await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (strictInvocationFailed(invocation, result)) {
-      io.stderr.write("Agent Hub ops status failed\n");
+      io.stderr.write(`${strictFailureMessage(invocation)}\n`);
       return 1;
     }
     return 0;
@@ -542,7 +562,15 @@ export async function runCli(
 }
 
 function strictInvocationFailed(invocation: CliInvocation, result: unknown): boolean {
-  return invocation.command === "ops:status" && invocation.options.strict === true && resultOk(result) === false;
+  return (invocation.command === "ops:status" || invocation.command === "ops:observe")
+    && invocation.options.strict === true
+    && resultOk(result) === false;
+}
+
+function strictFailureMessage(invocation: CliInvocation): string {
+  return invocation.command === "ops:observe"
+    ? "Agent Hub ops observe failed"
+    : "Agent Hub ops status failed";
 }
 
 function resultOk(result: unknown): boolean | undefined {
@@ -581,6 +609,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.doctor(invocation.options);
     case "ops:status":
       return client.getOpsStatus(invocation.options);
+    case "ops:observe":
+      return client.observeOpsStatus(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -809,6 +839,7 @@ function helpText(): string {
   agent-hub metrics
   agent-hub doctor [--project <project-name-or-id>]
   agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
+  agent-hub ops observe [--project <project-name-or-id>] [--iterations 24] [--interval-ms 3600000] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

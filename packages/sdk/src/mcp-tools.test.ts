@@ -11,6 +11,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_get_metrics",
       "agent_hub_doctor",
       "agent_hub_get_ops_status",
+      "agent_hub_observe_ops_status",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -127,6 +128,45 @@ describe("Agent Hub MCP tools", () => {
       project: "oph",
       alertLimit: 5,
       executionLimit: 3,
+      failOnWarning: true,
+    });
+  });
+
+  test("ops observe tool runs repeated project operational snapshots", async () => {
+    const observeOpsStatus = vi.fn(async () => ({
+      ok: false,
+      iterations: 2,
+      failedIterations: 1,
+      snapshots: [{ ok: false }, { ok: true }],
+    }));
+    const tools = createAgentHubMcpTools({ observeOpsStatus } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_observe_ops_status")?.handler({
+      project: "oph",
+      iterations: 2,
+      intervalMs: 0,
+      alertLimit: 4,
+      executionLimit: 2,
+      failOnWarning: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: false,
+            iterations: 2,
+            failedIterations: 1,
+            snapshots: [{ ok: false }, { ok: true }],
+          }, null, 2),
+        },
+      ],
+    });
+    expect(observeOpsStatus).toHaveBeenCalledWith({
+      project: "oph",
+      iterations: 2,
+      intervalMs: 0,
+      alertLimit: 4,
+      executionLimit: 2,
       failOnWarning: true,
     });
   });

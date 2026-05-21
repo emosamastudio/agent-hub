@@ -56,6 +56,36 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses ops observation loops", () => {
+    expect(parseCliInvocation([
+      "ops",
+      "observe",
+      "--project",
+      "oph",
+      "--iterations",
+      "2",
+      "--interval-ms",
+      "0",
+      "--alert-limit",
+      "4",
+      "--execution-limit",
+      "2",
+      "--strict",
+      "--fail-on-warning",
+    ])).toEqual({
+      command: "ops:observe",
+      options: {
+        project: "oph",
+        iterations: 2,
+        intervalMs: 0,
+        alertLimit: 4,
+        executionLimit: 2,
+        strict: true,
+        failOnWarning: true,
+      },
+    });
+  });
+
   test("parses project drain invocations", () => {
     expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
       command: "projects:drain",
@@ -572,6 +602,62 @@ describe("agent-hub CLI", () => {
       },
     });
     expect(stderr.text).toContain("Agent Hub ops status failed");
+  });
+
+  test("returns a non-zero exit code for strict failed ops observation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true }, alerts_active: 1 });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([{ id: "project-1", name: "oph", displayName: "Open Source Project Hunter" }]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "enrich_repo", executorStatus: "online" }]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([{ agent_name: "enrich_repo", executor_status: "online" }]);
+      }
+      if (url === "http://hub/api/alerts?limit=20") {
+        return jsonResponse([{ id: 7, ruleName: "failed_runs", acknowledgedAt: null }]);
+      }
+      if (url === "http://hub/api/scheduler/status?project=project-1") {
+        return jsonResponse({ runtime: { running: true }, agents: [] });
+      }
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    await expect(runCli([
+      "ops",
+      "observe",
+      "--project",
+      "oph",
+      "--iterations",
+      "1",
+      "--interval-ms",
+      "0",
+      "--strict",
+      "--fail-on-warning",
+    ], {
+      AGENT_HUB_URL: "http://hub",
+      AGENT_HUB_DASHBOARD_USER: "admin",
+      AGENT_HUB_DASHBOARD_PASSWORD: "secret",
+      AGENT_HUB_API_KEY: "dev-key",
+    }, { stdout, stderr })).resolves.toBe(1);
+
+    expect(JSON.parse(stdout.text)).toMatchObject({
+      ok: false,
+      iterations: 1,
+      failedIterations: 1,
+    });
+    expect(stderr.text).toContain("Agent Hub ops observe failed");
   });
 
   test("returns a non-zero exit code when strict ops status treats warnings as failures", async () => {

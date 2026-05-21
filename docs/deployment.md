@@ -100,6 +100,7 @@ During the first 24 hours after deployment, check at least these fields every ho
 Useful operator loop:
 
 ```bash
+node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interval-ms 3600000 --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js scheduler status --project oph
@@ -170,6 +171,7 @@ After OPH registers its executor agents:
 ```bash
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning --execution-limit 5
+node packages/sdk/dist/cli.js ops observe --project oph --iterations 2 --interval-ms 300000 --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js scheduler status --project oph
 node packages/sdk/dist/cli.js agents list --project oph
