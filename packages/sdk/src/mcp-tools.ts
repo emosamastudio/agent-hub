@@ -69,11 +69,13 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       inputSchema: {
         project: z.string().optional(),
         alertLimit: z.number().int().min(1).optional(),
+        executionLimit: z.number().int().min(1).optional(),
         failOnWarning: z.boolean().optional(),
       },
       handler: async (args) => toMcpText(await client.getOpsStatus(compactDefined({
         project: stringArg(args.project),
         alertLimit: numberArg(args.alertLimit),
+        executionLimit: numberArg(args.executionLimit),
         failOnWarning: booleanArg(args.failOnWarning),
       }) as AgentHubOpsStatusOptions)),
     },

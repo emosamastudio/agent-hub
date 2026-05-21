@@ -137,6 +137,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         options: compactDefined({
           project: stringFlag(parsed.flags, "project"),
           alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
           strict: parsed.flags.strict === true ? true : undefined,
           failOnWarning: parsed.flags["fail-on-warning"] === true ? true : undefined,
         }),
@@ -761,7 +762,7 @@ function helpText(): string {
   agent-hub ready
   agent-hub metrics
   agent-hub doctor [--project <project-name-or-id>]
-  agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--strict] [--fail-on-warning]
+  agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

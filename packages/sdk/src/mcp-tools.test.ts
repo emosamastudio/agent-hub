@@ -109,6 +109,7 @@ describe("Agent Hub MCP tools", () => {
     await expect(tools.find((tool) => tool.name === "agent_hub_get_ops_status")?.handler({
       project: "oph",
       alertLimit: 5,
+      executionLimit: 3,
       failOnWarning: true,
     })).resolves.toEqual({
       content: [
@@ -125,6 +126,7 @@ describe("Agent Hub MCP tools", () => {
     expect(getOpsStatus).toHaveBeenCalledWith({
       project: "oph",
       alertLimit: 5,
+      executionLimit: 3,
       failOnWarning: true,
     });
   });

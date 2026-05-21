@@ -258,6 +258,7 @@ export interface AgentHubDoctorReport {
 export interface AgentHubOpsStatusOptions {
   project?: string;
   alertLimit?: number;
+  executionLimit?: number;
   failOnWarning?: boolean;
 }
 
@@ -286,6 +287,12 @@ export interface AgentHubOpsStatusReport {
   scheduler?: unknown;
   agents: unknown[];
   executors: unknown[];
+  executions: {
+    queued: unknown[];
+    running: unknown[];
+    failed: unknown[];
+    timeout: unknown[];
+  };
   alerts: unknown[];
 }
 
@@ -420,6 +427,12 @@ function countOnlineRecords(records: unknown[], fields: string[]): number {
     const object = objectRecord(record);
     return object ? fields.some((field) => object[field] === 'online') : false;
   }).length;
+}
+
+function positiveIntegerOr(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.trunc(value)
+    : fallback;
 }
 
 function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
@@ -583,6 +596,12 @@ export class AgentHubControlClient {
     let scheduler: unknown;
     let agents: unknown[] = [];
     let executors: unknown[] = [];
+    let executions: AgentHubOpsStatusReport["executions"] = {
+      queued: [],
+      running: [],
+      failed: [],
+      timeout: [],
+    };
     if (!options.project || projectId) {
       scheduler = await this.requestJson(
         'GET',
@@ -592,6 +611,35 @@ export class AgentHubControlClient {
       );
       agents = await this.listAgentsByProjectId(projectQuery);
       executors = await this.listExecutorsByProjectId(projectQuery);
+      const executionLimit = positiveIntegerOr(options.executionLimit, 5);
+      const [queued, running, failed, timeout] = await Promise.all([
+        this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
+          ...projectQuery,
+          status: 'queued',
+          limit: executionLimit,
+        }), undefined, 'dashboard'),
+        this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
+          ...projectQuery,
+          status: 'running',
+          limit: executionLimit,
+        }), undefined, 'dashboard'),
+        this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
+          ...projectQuery,
+          status: 'failed',
+          limit: executionLimit,
+        }), undefined, 'dashboard'),
+        this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
+          ...projectQuery,
+          status: 'timeout',
+          limit: executionLimit,
+        }), undefined, 'dashboard'),
+      ]);
+      executions = {
+        queued,
+        running,
+        failed,
+        timeout,
+      };
     }
     const alerts = await this.listAlerts({ limit: options.alertLimit ?? 20 });
     const metrics = doctor.metrics;
@@ -621,6 +669,7 @@ export class AgentHubControlClient {
       scheduler,
       agents,
       executors,
+      executions,
       alerts,
     };
   }

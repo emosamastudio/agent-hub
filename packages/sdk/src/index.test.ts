@@ -928,6 +928,10 @@ describe("AgentHubControlClient", () => {
     const alerts = [
       { id: 7, ruleName: "failed_runs", acknowledgedAt: null },
     ];
+    const queuedExecutions = [{ id: "exec-queued", status: "queued", agentId: "agent-1" }];
+    const runningExecutions = [{ id: "exec-running", status: "running", agentId: "agent-1" }];
+    const failedExecutions = [{ id: "exec-failed", status: "failed", agentId: "agent-2" }];
+    const timeoutExecutions = [{ id: "exec-timeout", status: "timeout", agentId: "agent-2" }];
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();
       requests.push(url);
@@ -943,6 +947,10 @@ describe("AgentHubControlClient", () => {
       if (url === "http://hub/api/executors?project=project-1") return jsonResponse(executors);
       if (url === "http://hub/api/alerts?limit=20") return jsonResponse(alerts);
       if (url === "http://hub/api/scheduler/status?project=project-1") return jsonResponse(scheduler);
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=3") return jsonResponse(queuedExecutions);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=3") return jsonResponse(runningExecutions);
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=3") return jsonResponse(failedExecutions);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=3") return jsonResponse(timeoutExecutions);
       if (url === "http://hub/api/alerts?limit=5") return jsonResponse(alerts);
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -955,7 +963,7 @@ describe("AgentHubControlClient", () => {
       apiKey: "dev-key",
     });
 
-    await expect(client.getOpsStatus({ project: "oph", alertLimit: 5 })).resolves.toMatchObject({
+    await expect(client.getOpsStatus({ project: "oph", alertLimit: 5, executionLimit: 3 })).resolves.toMatchObject({
       ok: true,
       project: {
         requested: "oph",
@@ -979,6 +987,12 @@ describe("AgentHubControlClient", () => {
       agents,
       executors,
       alerts,
+      executions: {
+        queued: queuedExecutions,
+        running: runningExecutions,
+        failed: failedExecutions,
+        timeout: timeoutExecutions,
+      },
     });
     expect(requests).toEqual([
       "http://hub/api/health",
@@ -991,6 +1005,10 @@ describe("AgentHubControlClient", () => {
       "http://hub/api/scheduler/status?project=project-1",
       "http://hub/api/agents?project=project-1",
       "http://hub/api/executors?project=project-1",
+      "http://hub/api/executions?project=project-1&status=queued&limit=3",
+      "http://hub/api/executions?project=project-1&status=running&limit=3",
+      "http://hub/api/executions?project=project-1&status=failed&limit=3",
+      "http://hub/api/executions?project=project-1&status=timeout&limit=3",
       "http://hub/api/alerts?limit=5",
     ]);
   });
@@ -1016,6 +1034,10 @@ describe("AgentHubControlClient", () => {
       if (url === "http://hub/api/scheduler/status?project=project-1") {
         return jsonResponse({ runtime: { running: true }, agents: [] });
       }
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);

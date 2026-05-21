@@ -40,6 +40,8 @@ describe("agent-hub CLI", () => {
       "oph",
       "--alert-limit",
       "5",
+      "--execution-limit",
+      "3",
       "--strict",
       "--fail-on-warning",
     ])).toEqual({
@@ -47,6 +49,7 @@ describe("agent-hub CLI", () => {
       options: {
         project: "oph",
         alertLimit: 5,
+        executionLimit: 3,
         strict: true,
         failOnWarning: true,
       },
@@ -521,6 +524,10 @@ describe("agent-hub CLI", () => {
       if (url === "http://hub/api/scheduler/status?project=project-1") {
         return jsonResponse({ runtime: { running: true }, agents: [] });
       }
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
       throw new Error(`Unexpected request: ${url}`);
     }));
     const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
