@@ -86,6 +86,35 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses ops recovery plan generation", () => {
+    expect(parseCliInvocation([
+      "ops",
+      "recovery-plan",
+      "--project",
+      "oph",
+      "--backup-dir",
+      "/var/backups/agent-hub",
+      "--backup-file",
+      "/var/backups/agent-hub/pre-upgrade.sql",
+      "--service-name",
+      "agent-hub",
+      "--env-file",
+      "/etc/agent-hub/agent-hub.env",
+      "--execution-limit",
+      "5",
+    ])).toEqual({
+      command: "ops:recovery-plan",
+      options: {
+        project: "oph",
+        backupDir: "/var/backups/agent-hub",
+        backupFile: "/var/backups/agent-hub/pre-upgrade.sql",
+        serviceName: "agent-hub",
+        envFile: "/etc/agent-hub/agent-hub.env",
+        executionLimit: 5,
+      },
+    });
+  });
+
   test("parses project drain invocations", () => {
     expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
       command: "projects:drain",
@@ -566,6 +595,42 @@ describe("agent-hub CLI", () => {
         },
       },
     });
+  });
+
+  test("prints recovery plan with database configuration inferred from env", async () => {
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    await expect(runCli([
+      "ops",
+      "recovery-plan",
+      "--project",
+      "oph",
+      "--backup-dir",
+      "/var/backups/agent-hub",
+      "--backup-file",
+      "/var/backups/agent-hub/pre-upgrade.sql",
+      "--url",
+      "http://hub",
+    ], {
+      DATABASE_URL: "postgres://secret@db/agent_hub",
+      AGENT_HUB_DASHBOARD_USER: "admin",
+      AGENT_HUB_DASHBOARD_PASSWORD: "secret",
+      AGENT_HUB_API_KEY: "dev-key",
+    }, { stdout, stderr })).resolves.toBe(0);
+
+    expect(stderr.text).toBe("");
+    const plan = JSON.parse(stdout.text);
+    expect(plan).toMatchObject({
+      serverUrl: "http://hub",
+      project: "oph",
+      databaseUrlConfigured: true,
+      backup: {
+        outputPath: "/var/backups/agent-hub/pre-upgrade.sql",
+      },
+      warnings: [],
+    });
+    expect(stdout.text).not.toContain("postgres://secret");
   });
 
   test("returns a non-zero exit code for strict failed ops status snapshots", async () => {

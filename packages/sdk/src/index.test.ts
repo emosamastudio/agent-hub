@@ -1120,6 +1120,76 @@ describe("AgentHubControlClient", () => {
     expect(metricsCalls).toBe(2);
   });
 
+  test("getRecoveryPlan returns backup, rollback, and verification commands without exposing the database URL", () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    expect(client.getRecoveryPlan({
+      project: "oph",
+      backupDir: "/var/backups/agent-hub",
+      backupFile: "/var/backups/agent-hub/pre-upgrade.sql",
+      serviceName: "agent-hub",
+      envFile: "/etc/agent-hub/agent-hub.env",
+      databaseUrlConfigured: true,
+      executionLimit: 5,
+    })).toMatchObject({
+      serverUrl: "http://hub",
+      project: "oph",
+      databaseUrlConfigured: true,
+      backup: {
+        outputPath: "/var/backups/agent-hub/pre-upgrade.sql",
+        commands: [
+          "mkdir -p '/var/backups/agent-hub'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && pg_dump \"$DATABASE_URL\" > '/var/backups/agent-hub/pre-upgrade.sql'",
+        ],
+      },
+      upgrade: {
+        commands: [
+          "sudo systemctl stop 'agent-hub'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && npm run db:migrate -w @agent-hub/server",
+          "sudo systemctl start 'agent-hub'",
+        ],
+      },
+      rollback: {
+        commands: [
+          "sudo systemctl stop 'agent-hub'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$DATABASE_URL\" < '/var/backups/agent-hub/pre-upgrade.sql'",
+          "sudo systemctl start 'agent-hub'",
+        ],
+      },
+      verify: {
+        commands: [
+          "curl -fsS 'http://hub/api/ready'",
+          "node packages/sdk/dist/cli.js ops status --project 'oph' --strict --fail-on-warning --execution-limit 5",
+          "node packages/sdk/dist/cli.js ops observe --project 'oph' --iterations 2 --interval-ms 300000 --strict --fail-on-warning --execution-limit 5",
+        ],
+      },
+      warnings: [],
+    });
+  });
+
+  test("getRecoveryPlan default backup path is concrete and warns when database env is missing", () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    const plan = client.getRecoveryPlan();
+
+    expect(plan.backup.outputPath).toMatch(/^\/var\/backups\/agent-hub\/agent_hub_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.sql$/);
+    expect(plan.backup.outputPath).not.toContain("$(");
+    expect(plan.databaseUrlConfigured).toBe(false);
+    expect(plan.warnings).toEqual([
+      "DATABASE_URL is not configured in this environment; load the production env file before running backup or restore commands.",
+    ]);
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();

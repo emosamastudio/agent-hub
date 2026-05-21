@@ -254,6 +254,7 @@ node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interval-ms 3600000 --strict --fail-on-warning --execution-limit 5
+node packages/sdk/dist/cli.js ops recovery-plan --project oph --backup-dir /var/backups/agent-hub
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -331,6 +332,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `ops observe --project <name-or-id>` runs repeated `ops status` snapshots and returns a JSON report with `iterations`, `failedIterations`, and `snapshots`. For a 24-hour OPH observation window, use `--iterations 24 --interval-ms 3600000 --strict --fail-on-warning`; the command prints the full observation report and exits non-zero if any snapshot is unhealthy.
 
+`ops recovery-plan --project <name-or-id>` generates backup, upgrade, rollback, and verification commands without exposing the actual `DATABASE_URL`. It is intended for agent-run upgrade prep and incident rollback notes; review the generated commands, run the backup before migration, and keep the printed backup path with the release record.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
@@ -387,6 +390,7 @@ Exposed tools:
 - `agent_hub_doctor`
 - `agent_hub_get_ops_status`
 - `agent_hub_observe_ops_status`
+- `agent_hub_get_recovery_plan`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

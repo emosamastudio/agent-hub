@@ -186,6 +186,16 @@ Use a low-risk OPH handler for first smoke. Run `deep_research` only during the 
 
 ## Backup And Upgrade
 
+Before touching the running service, generate the agent-readable recovery plan:
+
+```bash
+node packages/sdk/dist/cli.js ops recovery-plan \
+  --project oph \
+  --backup-dir /var/backups/agent-hub \
+  --service-name agent-hub \
+  --env-file /etc/agent-hub/agent-hub.env
+```
+
 Before an upgrade:
 
 ```bash
@@ -204,4 +214,4 @@ sudo systemctl start agent-hub
 curl -fsS http://127.0.0.1:8788/api/ready
 ```
 
-Rollback is release-directory rollback plus database restore when a failed migration is not backward compatible.
+Rollback is release-directory rollback plus database restore when a failed migration is not backward compatible. Use the `rollback.commands` and `verify.commands` returned by `ops recovery-plan` so the exact backup path and post-restore checks are captured in the incident or release notes.

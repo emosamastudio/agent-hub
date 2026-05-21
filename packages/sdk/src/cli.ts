@@ -21,6 +21,7 @@ import {
   type AgentHubMisfirePolicy,
   type AgentHubObserveOpsStatusOptions,
   type AgentHubOpsStatusOptions,
+  type AgentHubRecoveryPlanOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
@@ -41,6 +42,8 @@ interface CliOpsObserveOptions extends AgentHubObserveOpsStatusOptions {
   strict?: boolean;
 }
 
+interface CliRecoveryPlanOptions extends AgentHubRecoveryPlanOptions {}
+
 interface CliMcpConfigOptions {
   name?: string;
   command?: string;
@@ -55,6 +58,7 @@ type CliInvocation =
   | { command: "doctor"; options: AgentHubDoctorOptions }
   | { command: "ops:status"; options: CliOpsStatusOptions }
   | { command: "ops:observe"; options: CliOpsObserveOptions }
+  | { command: "ops:recovery-plan"; options: CliRecoveryPlanOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -167,6 +171,19 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
           intervalMs: numberFlag(parsed.flags, "interval-ms"),
           strict: parsed.flags.strict === true ? true : undefined,
           failOnWarning: parsed.flags["fail-on-warning"] === true ? true : undefined,
+        }),
+      };
+    }
+    if (subcommand === "recovery-plan") {
+      return {
+        command: "ops:recovery-plan",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          backupDir: stringFlag(parsed.flags, "backup-dir"),
+          backupFile: stringFlag(parsed.flags, "backup-file"),
+          serviceName: stringFlag(parsed.flags, "service-name"),
+          envFile: stringFlag(parsed.flags, "env-file"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
         }),
       };
     }
@@ -548,7 +565,12 @@ export async function runCli(
     }
 
     const client = new AgentHubControlClient(buildControlConfig(env, flags));
-    const result = await executeInvocation(client, invocation);
+    const result = invocation.command === "ops:recovery-plan"
+      ? client.getRecoveryPlan({
+        ...invocation.options,
+        databaseUrlConfigured: Boolean(env.DATABASE_URL),
+      })
+      : await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (strictInvocationFailed(invocation, result)) {
       io.stderr.write(`${strictFailureMessage(invocation)}\n`);
@@ -611,6 +633,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.getOpsStatus(invocation.options);
     case "ops:observe":
       return client.observeOpsStatus(invocation.options);
+    case "ops:recovery-plan":
+      return client.getRecoveryPlan(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -840,6 +864,7 @@ function helpText(): string {
   agent-hub doctor [--project <project-name-or-id>]
   agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub ops observe [--project <project-name-or-id>] [--iterations 24] [--interval-ms 3600000] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
+  agent-hub ops recovery-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--service-name agent-hub] [--env-file /etc/agent-hub/agent-hub.env]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

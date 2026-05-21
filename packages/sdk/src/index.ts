@@ -310,6 +310,37 @@ export interface AgentHubObserveOpsStatusReport {
   snapshots: AgentHubOpsStatusReport[];
 }
 
+export interface AgentHubRecoveryPlanOptions {
+  project?: string;
+  backupDir?: string;
+  backupFile?: string;
+  serviceName?: string;
+  envFile?: string;
+  databaseUrlConfigured?: boolean;
+  executionLimit?: number;
+}
+
+export interface AgentHubRecoveryPlan {
+  generatedAt: string;
+  serverUrl: string;
+  project?: string;
+  databaseUrlConfigured: boolean;
+  backup: {
+    outputPath: string;
+    commands: string[];
+  };
+  upgrade: {
+    commands: string[];
+  };
+  rollback: {
+    commands: string[];
+  };
+  verify: {
+    commands: string[];
+  };
+  warnings: string[];
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -457,6 +488,10 @@ function nonNegativeIntegerOr(value: number | undefined, fallback: number): numb
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
@@ -724,6 +759,56 @@ export class AgentHubControlClient {
       iterations,
       failedIterations,
       snapshots,
+    };
+  }
+
+  getRecoveryPlan(options: AgentHubRecoveryPlanOptions = {}): AgentHubRecoveryPlan {
+    const generatedAt = new Date().toISOString();
+    const backupDir = options.backupDir ?? "/var/backups/agent-hub";
+    const backupFile = options.backupFile ?? `${backupDir}/agent_hub_${generatedAt.replace(/[:.]/g, "-")}.sql`;
+    const serviceName = options.serviceName ?? "agent-hub";
+    const envFile = options.envFile ?? "/etc/agent-hub/agent-hub.env";
+    const executionLimit = positiveIntegerOr(options.executionLimit, 5);
+    const projectArgs = options.project ? ` --project ${shellQuote(options.project)}` : "";
+    const loadEnvCommand = `set -a && . ${shellQuote(envFile)} && set +a`;
+    const warnings = options.databaseUrlConfigured === true
+      ? []
+      : ["DATABASE_URL is not configured in this environment; load the production env file before running backup or restore commands."];
+
+    return {
+      generatedAt,
+      serverUrl: this.config.serverUrl,
+      project: options.project,
+      databaseUrlConfigured: options.databaseUrlConfigured === true,
+      backup: {
+        outputPath: backupFile,
+        commands: [
+          `mkdir -p ${shellQuote(backupDir)}`,
+          `${loadEnvCommand} && pg_dump "$DATABASE_URL" > ${shellQuote(backupFile)}`,
+        ],
+      },
+      upgrade: {
+        commands: [
+          `sudo systemctl stop ${shellQuote(serviceName)}`,
+          `${loadEnvCommand} && npm run db:migrate -w @agent-hub/server`,
+          `sudo systemctl start ${shellQuote(serviceName)}`,
+        ],
+      },
+      rollback: {
+        commands: [
+          `sudo systemctl stop ${shellQuote(serviceName)}`,
+          `${loadEnvCommand} && psql "$DATABASE_URL" < ${shellQuote(backupFile)}`,
+          `sudo systemctl start ${shellQuote(serviceName)}`,
+        ],
+      },
+      verify: {
+        commands: [
+          `curl -fsS ${shellQuote(`${this.config.serverUrl}/api/ready`)}`,
+          `node packages/sdk/dist/cli.js ops status${projectArgs} --strict --fail-on-warning --execution-limit ${executionLimit}`,
+          `node packages/sdk/dist/cli.js ops observe${projectArgs} --iterations 2 --interval-ms 300000 --strict --fail-on-warning --execution-limit ${executionLimit}`,
+        ],
+      },
+      warnings,
     };
   }
 
