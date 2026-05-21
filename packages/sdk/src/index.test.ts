@@ -995,6 +995,47 @@ describe("AgentHubControlClient", () => {
     ]);
   });
 
+  test("getOpsStatus can treat warnings as a failed snapshot", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true }, alerts_active: 1 });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([{ id: "project-1", name: "oph", displayName: "Open Source Project Hunter" }]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "enrich_repo", executorStatus: "online" }]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([{ agent_name: "enrich_repo", executor_status: "online" }]);
+      }
+      if (url === "http://hub/api/alerts?limit=20") {
+        return jsonResponse([{ id: 7, ruleName: "failed_runs", acknowledgedAt: null }]);
+      }
+      if (url === "http://hub/api/scheduler/status?project=project-1") {
+        return jsonResponse({ runtime: { running: true }, agents: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.getOpsStatus({ project: "oph", failOnWarning: true })).resolves.toMatchObject({
+      ok: false,
+      summary: {
+        errors: 0,
+        warnings: 1,
+      },
+    });
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();

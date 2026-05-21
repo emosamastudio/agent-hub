@@ -250,6 +250,7 @@ export interface AgentHubDoctorReport {
 export interface AgentHubOpsStatusOptions {
   project?: string;
   alertLimit?: number;
+  failOnWarning?: boolean;
 }
 
 export interface AgentHubOpsStatusSummary {
@@ -587,8 +588,10 @@ export class AgentHubControlClient {
     const alerts = await this.listAlerts({ limit: options.alertLimit ?? 20 });
     const metrics = doctor.metrics;
 
+    const ok = doctor.ok && (options.failOnWarning === true ? doctor.summary.warnings === 0 : true);
+
     return {
-      ok: doctor.ok,
+      ok,
       generatedAt: new Date().toISOString(),
       serverUrl: this.config.serverUrl,
       project: doctor.project,
