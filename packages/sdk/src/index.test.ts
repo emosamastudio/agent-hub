@@ -173,9 +173,33 @@ describe("AgentHubClient", () => {
       handler: "demo_handler",
       cron: "*/5 * * * *",
     });
+    client.handle("demo_handler", async () => ({ ok: true }));
 
     await expect(client.syncRegistry()).resolves.toEqual([{ id: "agent-1", name: "demo_agent" }]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  test("syncRegistry rejects agents without matching local handlers before registration", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "agent-1", name: "demo_agent" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubClient({
+      serverUrl: "http://hub",
+      project: "default",
+      apiKey: "dev-key",
+    });
+    client.register({
+      name: "demo_agent",
+      displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK registry synchronization.",
+      agentType: "cron_task",
+      handler: "demo_handler",
+    });
+
+    await expect(client.syncRegistry()).rejects.toThrow(
+      "Agent Hub handler demo_handler is not registered for agent demo_agent",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("runOnce reports failed when the handler throws", async () => {

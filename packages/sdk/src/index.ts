@@ -905,19 +905,25 @@ export class AgentHubClient {
 
   async start() {
     this.running = true;
-    await this.registerAll();
-    this.startHeartbeat();
-    while (this.running) {
-      try {
-        await this.runOnce();
-      } catch (err) {
-        // Network error — back off and retry
-        await new Promise(r => setTimeout(r, 1000));
+    try {
+      await this.syncRegistry();
+      this.startHeartbeat();
+      while (this.running) {
+        try {
+          await this.runOnce();
+        } catch (err) {
+          // Network error — back off and retry
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
+    } catch (error) {
+      this.running = false;
+      throw error;
     }
   }
 
   async syncRegistry(): Promise<unknown[]> {
+    this.validateRegisteredHandlers();
     const registered = [];
     for (const agent of this.agents) {
       const res = await this.fetch('PUT', `/api/registry/agents`, agent);
@@ -957,11 +963,11 @@ export class AgentHubClient {
     return urls[Math.floor(Math.random() * urls.length)];
   }
 
-  private async registerAll() {
+  private validateRegisteredHandlers() {
     for (const agent of this.agents) {
-      const res = await this.fetch('PUT', `/api/registry/agents`, agent);
-      if (!res.ok) {
-        console.error(`Failed to register ${agent.name}: ${res.status}`);
+      const handlerName = agent.handler || agent.name;
+      if (!this.handlers.has(handlerName) && !this.handlers.has(agent.name)) {
+        throw new Error(`Agent Hub handler ${handlerName} is not registered for agent ${agent.name}`);
       }
     }
   }

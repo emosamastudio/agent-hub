@@ -222,6 +222,30 @@ func TestSyncRegistryRequiresAgentDescription(t *testing.T) {
 	}
 }
 
+func TestRunRejectsAgentsWithoutMatchingMuxHandlersBeforeSync(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{ServerURL: server.URL})
+	client.Register(testAgentSpec("deep_research", "deep_research_handler"))
+
+	mux := NewServeMux()
+	mux.HandleFunc("relationship_handler", func(ctx *Context, job *Job) error { return nil })
+
+	err := client.Run(context.Background(), mux)
+	if err == nil || !strings.Contains(err.Error(), "handler deep_research_handler is not registered for agent deep_research") {
+		t.Fatalf("Run error = %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("request count = %d", requestCount)
+	}
+}
+
 func TestRunReportsMissingHandlerAsFailedExecution(t *testing.T) {
 	reported := make(chan Result, 1)
 
@@ -252,9 +276,9 @@ func TestRunReportsMissingHandlerAsFailedExecution(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{ServerURL: server.URL})
-	client.Register(testAgentSpec("deep_research", "missing_handler"))
+	client.Register(testAgentSpec("deep_research", "deep_research_handler"))
 	mux := NewServeMux()
-	mux.HandleFunc("other_handler", func(ctx *Context, job *Job) error { return nil })
+	mux.HandleFunc("deep_research_handler", func(ctx *Context, job *Job) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -242,13 +242,16 @@ func (c *Client) Report(ctx context.Context, executionID string, result Result) 
 	return closeResponse(resp)
 }
 
-// Run syncs the registry, heartbeats in the background, polls continuously, and reports results.
+// Run validates handler wiring, syncs the registry, heartbeats in the background, polls continuously, and reports results.
 func (c *Client) Run(ctx context.Context, mux *ServeMux) error {
 	if mux == nil {
 		return errors.New("agenthub: nil mux")
 	}
 	if len(mux.handlers) == 0 {
 		return errors.New("agenthub: no handlers registered")
+	}
+	if err := c.validateHandlers(mux); err != nil {
+		return err
 	}
 	if _, err := c.SyncRegistry(ctx); err != nil {
 		return fmt.Errorf("sync registry: %w", err)
@@ -282,6 +285,19 @@ func (c *Client) Run(ctx context.Context, mux *ServeMux) error {
 			return fmt.Errorf("report execution %s: %w", job.ExecutionID, err)
 		}
 	}
+}
+
+func (c *Client) validateHandlers(mux *ServeMux) error {
+	for _, agent := range c.agents {
+		handlerName := agent.Handler
+		if handlerName == "" {
+			handlerName = agent.Name
+		}
+		if _, ok := mux.handlers[handlerName]; !ok {
+			return fmt.Errorf("agenthub: handler %s is not registered for agent %s", handlerName, agent.Name)
+		}
+	}
+	return nil
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context) {

@@ -162,6 +162,10 @@ hub.handle("demo_agent", async (ctx) => {
 await hub.start();
 ```
 
+Executor registry sync is fail-fast: `syncRegistry()` and `start()` verify that
+each registered agent has a local handler before exposing it to Agent Hub for
+scheduling.
+
 For deterministic tests or one-shot workers, call `await hub.runOnce()` to poll and execute at most one queued execution.
 
 ## Go SDK
@@ -212,6 +216,10 @@ func main() {
 	}
 }
 ```
+
+`Run` validates the registered Go agents against the mux before syncing the
+registry. A missing handler fails locally before Agent Hub can schedule work to
+that executor.
 
 For local source integration when testing unreleased changes, consumers can use
 a temporary Go module replace:

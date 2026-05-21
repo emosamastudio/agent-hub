@@ -152,6 +152,11 @@ Stable response fields:
 
 `description` is required and must clearly explain the agent's responsibility. Agent Hub rejects empty or missing descriptions so the dashboard, CLI, MCP tools, and operators can identify every registered agent without reading consumer-project code.
 
+Official executor SDKs validate local handler wiring before registry sync. A
+registered agent whose `handler` cannot be found locally fails before the SDK
+sends `PUT /api/registry/agents`, so Agent Hub does not schedule work to an
+executor that cannot run it.
+
 For operator and coding-agent workflows, Agent Hub control tools can target the same registered names. Prefer passing the project selector when operating by name:
 
 ```bash
