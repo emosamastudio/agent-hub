@@ -252,7 +252,7 @@ node packages/sdk/dist/cli.js health
 node packages/sdk/dist/cli.js ready
 node packages/sdk/dist/cli.js metrics
 node packages/sdk/dist/cli.js doctor --project oph
-node packages/sdk/dist/cli.js ops status --project oph
+node packages/sdk/dist/cli.js ops status --project oph --strict
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -319,7 +319,7 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `doctor --project <name-or-id>` runs the agent-facing deployment diagnostic in one call. It checks health, readiness, metrics, scheduler state, project discovery, registered agents, executor heartbeats, and active alerts, then returns a structured report with `ok`, `summary.errors`, `summary.warnings`, and per-check details.
 
-`ops status --project <name-or-id>` returns the higher-level operations snapshot for coding agents. It includes the doctor report, metrics, detailed scheduler state, project-scoped agents, executor heartbeats, active alerts, and a compact summary with queue, failure, online-agent, and alert counts.
+`ops status --project <name-or-id>` returns the higher-level operations snapshot for coding agents. It includes the doctor report, metrics, detailed scheduler state, project-scoped agents, executor heartbeats, active alerts, and a compact summary with queue, failure, online-agent, and alert counts. Add `--strict` when using it as a deployment gate; the CLI still prints the JSON snapshot, but exits non-zero if the snapshot reports `ok: false`.
 
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 

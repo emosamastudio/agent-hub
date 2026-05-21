@@ -32,13 +32,17 @@ type Env = Record<string, string | undefined>;
 type CliFlagValue = string | boolean;
 type CliFlags = Record<string, CliFlagValue>;
 
+interface CliOpsStatusOptions extends AgentHubOpsStatusOptions {
+  strict?: boolean;
+}
+
 type CliInvocation =
   | { command: "help" }
   | { command: "health" }
   | { command: "ready" }
   | { command: "metrics" }
   | { command: "doctor"; options: AgentHubDoctorOptions }
-  | { command: "ops:status"; options: AgentHubOpsStatusOptions }
+  | { command: "ops:status"; options: CliOpsStatusOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -132,6 +136,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
         options: compactDefined({
           project: stringFlag(parsed.flags, "project"),
           alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
+          strict: parsed.flags.strict === true ? true : undefined,
         }),
       };
     }
@@ -490,11 +495,25 @@ export async function runCli(
     const client = new AgentHubControlClient(buildControlConfig(env, flags));
     const result = await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (strictInvocationFailed(invocation, result)) {
+      io.stderr.write("Agent Hub ops status failed\n");
+      return 1;
+    }
     return 0;
   } catch (error) {
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+function strictInvocationFailed(invocation: CliInvocation, result: unknown): boolean {
+  return invocation.command === "ops:status" && invocation.options.strict === true && resultOk(result) === false;
+}
+
+function resultOk(result: unknown): boolean | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const ok = (result as { ok?: unknown }).ok;
+  return typeof ok === "boolean" ? ok : undefined;
 }
 
 async function executeInvocation(client: AgentHubControlClient, invocation: CliInvocation): Promise<unknown> {
@@ -732,7 +751,7 @@ function helpText(): string {
   agent-hub ready
   agent-hub metrics
   agent-hub doctor [--project <project-name-or-id>]
-  agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20]
+  agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--strict]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

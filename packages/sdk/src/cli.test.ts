@@ -1,7 +1,12 @@
-import { describe, expect, test } from "vitest";
-import { buildControlConfig, parseCliInvocation } from "./cli";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { buildControlConfig, parseCliInvocation, runCli } from "./cli";
 
 describe("agent-hub CLI", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   test("parses readiness checks", () => {
     expect(parseCliInvocation(["ready"])).toEqual({
       command: "ready",
@@ -35,11 +40,13 @@ describe("agent-hub CLI", () => {
       "oph",
       "--alert-limit",
       "5",
+      "--strict",
     ])).toEqual({
       command: "ops:status",
       options: {
         project: "oph",
         alertLimit: 5,
+        strict: true,
       },
     });
   });
@@ -427,4 +434,48 @@ describe("agent-hub CLI", () => {
       dashboardPassword: "secret",
     });
   });
+
+  test("returns a non-zero exit code for strict failed ops status snapshots", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true } });
+      if (url === "http://hub/api/projects") return jsonResponse([]);
+      if (url === "http://hub/api/alerts?limit=20") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    await expect(runCli([
+      "ops",
+      "status",
+      "--project",
+      "oph",
+      "--strict",
+    ], {
+      AGENT_HUB_URL: "http://hub",
+      AGENT_HUB_DASHBOARD_USER: "admin",
+      AGENT_HUB_DASHBOARD_PASSWORD: "secret",
+      AGENT_HUB_API_KEY: "dev-key",
+    }, { stdout, stderr })).resolves.toBe(1);
+
+    expect(JSON.parse(stdout.text)).toMatchObject({
+      ok: false,
+      project: {
+        requested: "oph",
+        found: false,
+      },
+    });
+    expect(stderr.text).toContain("Agent Hub ops status failed");
+  });
 });
+
+function jsonResponse(body: unknown, init?: ResponseInit) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+}
