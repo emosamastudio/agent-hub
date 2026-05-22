@@ -39,6 +39,16 @@ Override these in `.env` before exposing the server beyond localhost.
 
 For an internal stable deployment, use the production runbook in [`docs/deployment.md`](docs/deployment.md). Production mode does not seed the default project or demo agent unless `AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT=true` is set explicitly, and the server refuses to start with development database/auth/API-key defaults.
 
+For hosts without a modern Node runtime, including the current `emoworklaptop`
+target, use the production Docker Compose deployment:
+
+```bash
+docker compose \
+  --env-file /etc/agent-hub/agent-hub.env \
+  -f deploy/docker-compose.production.yml \
+  up -d --build
+```
+
 ## Core model
 
 Agent Hub owns:

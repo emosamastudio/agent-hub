@@ -21,6 +21,80 @@ set +a
 npm run db:migrate -w @agent-hub/server
 ```
 
+## Docker Compose
+
+Use Docker Compose on hosts where the system Node runtime is missing or too old
+for Agent Hub. This is the preferred deployment path for `emoworklaptop`, which
+currently has Docker available but only an obsolete system Node.
+
+Install the env file, then set at least `AGENT_HUB_POSTGRES_PASSWORD`,
+`AGENT_HUB_DASHBOARD_PASSWORD`, and `AGENT_HUB_DEFAULT_API_KEY`:
+
+```bash
+sudo install -d -m 0750 /etc/agent-hub
+sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
+sudo editor /etc/agent-hub/agent-hub.env
+```
+
+For the Compose deployment, `DATABASE_URL` is injected as
+`postgres://agent_hub:<AGENT_HUB_POSTGRES_PASSWORD>@postgres:5432/agent_hub` by
+`deploy/docker-compose.production.yml`; the local value in the env file is only
+used by non-containerized commands.
+
+Build, migrate, and start:
+
+```bash
+docker compose \
+  --env-file /etc/agent-hub/agent-hub.env \
+  -f deploy/docker-compose.production.yml \
+  up -d --build
+```
+
+Verify:
+
+```bash
+docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml ps
+docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml logs --tail=100 agent-hub
+curl -fsS http://127.0.0.1:8788/api/ready
+```
+
+Stop or restart:
+
+```bash
+docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml restart agent-hub
+docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml down
+```
+
+### emoworklaptop Target
+
+Current target facts from read-only preflight:
+
+- Connect through `ssh emoworklaptop_jump`; direct LAN/Tailscale SSH can be
+  unavailable from the development machine.
+- OS is Ubuntu 22.04.
+- Docker is installed.
+- System Node is v12 and should not be used for Agent Hub.
+- `/opt/agent-hub`, `~/workspace/agent-hub`, and `/etc/agent-hub/agent-hub.env`
+  were not present during preflight.
+- Port `8788` was not occupied during preflight.
+
+First deploy outline:
+
+```bash
+ssh emoworklaptop_jump
+git clone https://github.com/emosamastudio/agent-hub.git ~/workspace/agent-hub
+cd ~/workspace/agent-hub
+sudo install -d -m 0750 /etc/agent-hub
+sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
+sudo editor /etc/agent-hub/agent-hub.env
+docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml up -d --build
+curl -fsS http://127.0.0.1:8788/api/ready
+```
+
+If Docker Hub access fails while pulling `node:22-bookworm-slim` or
+`postgres:16-alpine`, configure Docker daemon proxy on `emoworklaptop` or load
+prebuilt images before running Compose.
+
 ## Environment
 
 Install the production env file from `deploy/agent-hub.env.example`:
