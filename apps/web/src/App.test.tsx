@@ -14,6 +14,7 @@ import {
   AgentTriggerPanel,
   AlertPanel,
   LanguageToggle,
+  dashboardDocumentLanguage,
   resolveInitialDashboardLanguage,
 } from "./App";
 import {
@@ -58,6 +59,8 @@ describe("Dashboard language", () => {
     expect(resolveInitialDashboardLanguage({
       getItem: () => "fr",
     })).toBe("zh");
+    expect(dashboardDocumentLanguage("zh")).toBe("zh-CN");
+    expect(dashboardDocumentLanguage("en")).toBe("en");
   });
 
   test("renders Chinese dashboard controls when the provider language is Chinese", () => {

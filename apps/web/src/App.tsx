@@ -675,6 +675,10 @@ export function resolveInitialDashboardLanguage(
   }
 }
 
+export function dashboardDocumentLanguage(language: DashboardLanguage): string {
+  return language === "zh" ? "zh-CN" : "en";
+}
+
 export function DashboardLanguageProvider({
   language,
   children,
@@ -2414,6 +2418,9 @@ export default function App() {
   }, [page]);
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = dashboardDocumentLanguage(language);
+    }
     try {
       window.localStorage.setItem(DASHBOARD_LANGUAGE_STORAGE_KEY, language);
     } catch {
