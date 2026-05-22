@@ -341,6 +341,34 @@ export interface AgentHubRecoveryPlan {
   warnings: string[];
 }
 
+export interface AgentHubRecoveryDrillPlanOptions extends AgentHubRecoveryPlanOptions {
+  restoreDatabaseEnvVar?: string;
+  restoreDatabaseUrlConfigured?: boolean;
+}
+
+export interface AgentHubRecoveryDrillPlan {
+  generatedAt: string;
+  serverUrl: string;
+  project?: string;
+  databaseUrlConfigured: boolean;
+  restoreDatabaseUrlConfigured: boolean;
+  restoreDatabaseEnvVar: string;
+  preflight: {
+    commands: string[];
+  };
+  backup: {
+    outputPath: string;
+    commands: string[];
+  };
+  restore: {
+    commands: string[];
+  };
+  verify: {
+    commands: string[];
+  };
+  warnings: string[];
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -492,6 +520,13 @@ function delay(ms: number): Promise<void> {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function shellEnvReference(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid shell environment variable name: ${name}`);
+  }
+  return `"$${name}"`;
 }
 
 function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): string {
@@ -806,6 +841,71 @@ export class AgentHubControlClient {
           `curl -fsS ${shellQuote(`${this.config.serverUrl}/api/ready`)}`,
           `node packages/sdk/dist/cli.js ops status${projectArgs} --strict --fail-on-warning --execution-limit ${executionLimit}`,
           `node packages/sdk/dist/cli.js ops observe${projectArgs} --iterations 2 --interval-ms 300000 --strict --fail-on-warning --execution-limit ${executionLimit}`,
+        ],
+      },
+      warnings,
+    };
+  }
+
+  getRecoveryDrillPlan(options: AgentHubRecoveryDrillPlanOptions = {}): AgentHubRecoveryDrillPlan {
+    const generatedAt = new Date().toISOString();
+    const backupDir = options.backupDir ?? "/var/backups/agent-hub";
+    const backupFile = options.backupFile ?? `${backupDir}/agent_hub_rehearsal_${generatedAt.replace(/[:.]/g, "-")}.sql`;
+    const envFile = options.envFile ?? "/etc/agent-hub/agent-hub.env";
+    const executionLimit = positiveIntegerOr(options.executionLimit, 5);
+    const restoreDatabaseEnvVar = options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL";
+    const restoreDatabaseRef = shellEnvReference(restoreDatabaseEnvVar);
+    const projectArgs = options.project ? ` --project ${shellQuote(options.project)}` : "";
+    const loadEnvCommand = `set -a && . ${shellQuote(envFile)} && set +a`;
+    const warnings = [
+      ...(options.databaseUrlConfigured === true
+        ? []
+        : ["DATABASE_URL is not configured in this environment; load the production env file before running backup commands."]),
+      ...(options.restoreDatabaseUrlConfigured === true
+        ? []
+        : [`${restoreDatabaseEnvVar} is not configured in this environment; set it to a disposable restore database before running the drill.`]),
+    ];
+
+    return {
+      generatedAt,
+      serverUrl: this.config.serverUrl,
+      project: options.project,
+      databaseUrlConfigured: options.databaseUrlConfigured === true,
+      restoreDatabaseUrlConfigured: options.restoreDatabaseUrlConfigured === true,
+      restoreDatabaseEnvVar,
+      preflight: {
+        commands: [
+          "command -v pg_dump",
+          "command -v psql",
+          `${loadEnvCommand} && test -n "$DATABASE_URL"`,
+          `${loadEnvCommand} && test -n ${restoreDatabaseRef}`,
+          `${loadEnvCommand} && test "$DATABASE_URL" != ${restoreDatabaseRef}`,
+          `curl -fsS ${shellQuote(`${this.config.serverUrl}/api/ready`)}`,
+          `node packages/sdk/dist/cli.js ops status${projectArgs} --strict --fail-on-warning --execution-limit ${executionLimit}`,
+        ],
+      },
+      backup: {
+        outputPath: backupFile,
+        commands: [
+          `mkdir -p ${shellQuote(backupDir)}`,
+          `${loadEnvCommand} && pg_dump "$DATABASE_URL" > ${shellQuote(backupFile)}`,
+        ],
+      },
+      restore: {
+        commands: [
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 < ${shellQuote(backupFile)}`,
+          `${loadEnvCommand} && DATABASE_URL=${restoreDatabaseRef} npm run db:migrate -w @agent-hub/server`,
+        ],
+      },
+      verify: {
+        commands: [
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS projects FROM projects;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS agents FROM agents;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS executions FROM executions;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS traces FROM traces;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS executions_with_missing_agents FROM executions e LEFT JOIN agents a ON a.id = e.agent_id WHERE a.id IS NULL;'`,
+          `${loadEnvCommand} && psql ${restoreDatabaseRef} -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS traces_with_missing_executions FROM traces t LEFT JOIN executions e ON e.id = t.execution_id WHERE e.id IS NULL;'`,
         ],
       },
       warnings,

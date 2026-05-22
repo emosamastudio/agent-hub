@@ -196,6 +196,21 @@ node packages/sdk/dist/cli.js ops recovery-plan \
   --env-file /etc/agent-hub/agent-hub.env
 ```
 
+Before the first production upgrade, and periodically after that, rehearse the
+restore flow against a disposable database. `AGENT_HUB_RESTORE_DATABASE_URL`
+must point at an empty throwaway database, never at production:
+
+```bash
+node packages/sdk/dist/cli.js ops recovery-drill-plan \
+  --project oph \
+  --backup-dir /var/backups/agent-hub \
+  --env-file /etc/agent-hub/agent-hub.env
+```
+
+Run the generated commands in order. The drill verifies that `pg_dump`, restore,
+migration replay, and core table integrity checks work before a real incident
+requires them.
+
 Before an upgrade:
 
 ```bash

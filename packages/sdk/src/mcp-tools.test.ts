@@ -13,6 +13,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_get_ops_status",
       "agent_hub_observe_ops_status",
       "agent_hub_get_recovery_plan",
+      "agent_hub_get_recovery_drill_plan",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -211,6 +212,49 @@ describe("Agent Hub MCP tools", () => {
       serviceName: "agent-hub",
       envFile: "/etc/agent-hub/agent-hub.env",
       databaseUrlConfigured: true,
+      executionLimit: 5,
+    });
+  });
+
+  test("recovery drill plan tool returns disposable restore rehearsal commands", async () => {
+    const getRecoveryDrillPlan = vi.fn(() => ({
+      ok: true,
+      project: "oph",
+      restore: { commands: ["psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" < backup.sql"] },
+      warnings: [],
+    }));
+    const tools = createAgentHubMcpTools({ getRecoveryDrillPlan } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_get_recovery_drill_plan")?.handler({
+      project: "oph",
+      backupDir: "/var/backups/agent-hub",
+      backupFile: "/var/backups/agent-hub/rehearsal.sql",
+      envFile: "/etc/agent-hub/agent-hub.env",
+      restoreDatabaseEnvVar: "AGENT_HUB_RESTORE_DATABASE_URL",
+      databaseUrlConfigured: true,
+      restoreDatabaseUrlConfigured: true,
+      executionLimit: 5,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            project: "oph",
+            restore: { commands: ["psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" < backup.sql"] },
+            warnings: [],
+          }, null, 2),
+        },
+      ],
+    });
+    expect(getRecoveryDrillPlan).toHaveBeenCalledWith({
+      project: "oph",
+      backupDir: "/var/backups/agent-hub",
+      backupFile: "/var/backups/agent-hub/rehearsal.sql",
+      envFile: "/etc/agent-hub/agent-hub.env",
+      restoreDatabaseEnvVar: "AGENT_HUB_RESTORE_DATABASE_URL",
+      databaseUrlConfigured: true,
+      restoreDatabaseUrlConfigured: true,
       executionLimit: 5,
     });
   });

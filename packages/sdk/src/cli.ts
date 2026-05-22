@@ -21,6 +21,7 @@ import {
   type AgentHubMisfirePolicy,
   type AgentHubObserveOpsStatusOptions,
   type AgentHubOpsStatusOptions,
+  type AgentHubRecoveryDrillPlanOptions,
   type AgentHubRecoveryPlanOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
@@ -44,6 +45,8 @@ interface CliOpsObserveOptions extends AgentHubObserveOpsStatusOptions {
 
 interface CliRecoveryPlanOptions extends AgentHubRecoveryPlanOptions {}
 
+interface CliRecoveryDrillPlanOptions extends AgentHubRecoveryDrillPlanOptions {}
+
 interface CliMcpConfigOptions {
   name?: string;
   command?: string;
@@ -59,6 +62,7 @@ type CliInvocation =
   | { command: "ops:status"; options: CliOpsStatusOptions }
   | { command: "ops:observe"; options: CliOpsObserveOptions }
   | { command: "ops:recovery-plan"; options: CliRecoveryPlanOptions }
+  | { command: "ops:recovery-drill-plan"; options: CliRecoveryDrillPlanOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -183,6 +187,19 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
           backupFile: stringFlag(parsed.flags, "backup-file"),
           serviceName: stringFlag(parsed.flags, "service-name"),
           envFile: stringFlag(parsed.flags, "env-file"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+        }),
+      };
+    }
+    if (subcommand === "recovery-drill-plan") {
+      return {
+        command: "ops:recovery-drill-plan",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          backupDir: stringFlag(parsed.flags, "backup-dir"),
+          backupFile: stringFlag(parsed.flags, "backup-file"),
+          envFile: stringFlag(parsed.flags, "env-file"),
+          restoreDatabaseEnvVar: stringFlag(parsed.flags, "restore-database-env-var"),
           executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
         }),
       };
@@ -570,6 +587,12 @@ export async function runCli(
         ...invocation.options,
         databaseUrlConfigured: Boolean(env.DATABASE_URL),
       })
+      : invocation.command === "ops:recovery-drill-plan"
+        ? client.getRecoveryDrillPlan({
+          ...invocation.options,
+          databaseUrlConfigured: Boolean(env.DATABASE_URL),
+          restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
+        })
       : await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (strictInvocationFailed(invocation, result)) {
@@ -635,6 +658,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.observeOpsStatus(invocation.options);
     case "ops:recovery-plan":
       return client.getRecoveryPlan(invocation.options);
+    case "ops:recovery-drill-plan":
+      return client.getRecoveryDrillPlan(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -865,6 +890,7 @@ function helpText(): string {
   agent-hub ops status [--project <project-name-or-id>] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub ops observe [--project <project-name-or-id>] [--iterations 24] [--interval-ms 3600000] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub ops recovery-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--service-name agent-hub] [--env-file /etc/agent-hub/agent-hub.env]
+  agent-hub ops recovery-drill-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

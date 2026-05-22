@@ -255,6 +255,7 @@ node packages/sdk/dist/cli.js doctor --project oph
 node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interval-ms 3600000 --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js ops recovery-plan --project oph --backup-dir /var/backups/agent-hub
+node packages/sdk/dist/cli.js ops recovery-drill-plan --project oph --backup-dir /var/backups/agent-hub
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -334,6 +335,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `ops recovery-plan --project <name-or-id>` generates backup, upgrade, rollback, and verification commands without exposing the actual `DATABASE_URL`. It is intended for agent-run upgrade prep and incident rollback notes; review the generated commands, run the backup before migration, and keep the printed backup path with the release record.
 
+`ops recovery-drill-plan --project <name-or-id>` generates a safe restore rehearsal against a disposable database referenced by `AGENT_HUB_RESTORE_DATABASE_URL`. It includes source and restore database preflight checks, backup creation, restore database reset, restore import, migration replay, and table-level integrity checks. The generated commands never print either database URL.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
@@ -391,6 +394,7 @@ Exposed tools:
 - `agent_hub_get_ops_status`
 - `agent_hub_observe_ops_status`
 - `agent_hub_get_recovery_plan`
+- `agent_hub_get_recovery_drill_plan`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

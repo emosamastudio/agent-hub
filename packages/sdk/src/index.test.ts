@@ -1190,6 +1190,68 @@ describe("AgentHubControlClient", () => {
     ]);
   });
 
+  test("getRecoveryDrillPlan returns a safe disposable restore rehearsal plan", () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    expect(client.getRecoveryDrillPlan({
+      project: "oph",
+      backupDir: "/var/backups/agent-hub",
+      backupFile: "/var/backups/agent-hub/rehearsal.sql",
+      envFile: "/etc/agent-hub/agent-hub.env",
+      restoreDatabaseEnvVar: "AGENT_HUB_RESTORE_DATABASE_URL",
+      databaseUrlConfigured: true,
+      restoreDatabaseUrlConfigured: true,
+      executionLimit: 5,
+    })).toMatchObject({
+      serverUrl: "http://hub",
+      project: "oph",
+      databaseUrlConfigured: true,
+      restoreDatabaseUrlConfigured: true,
+      restoreDatabaseEnvVar: "AGENT_HUB_RESTORE_DATABASE_URL",
+      preflight: {
+        commands: [
+          "command -v pg_dump",
+          "command -v psql",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && test -n \"$DATABASE_URL\"",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && test -n \"$AGENT_HUB_RESTORE_DATABASE_URL\"",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && test \"$DATABASE_URL\" != \"$AGENT_HUB_RESTORE_DATABASE_URL\"",
+          "curl -fsS 'http://hub/api/ready'",
+          "node packages/sdk/dist/cli.js ops status --project 'oph' --strict --fail-on-warning --execution-limit 5",
+        ],
+      },
+      backup: {
+        outputPath: "/var/backups/agent-hub/rehearsal.sql",
+        commands: [
+          "mkdir -p '/var/backups/agent-hub'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && pg_dump \"$DATABASE_URL\" > '/var/backups/agent-hub/rehearsal.sql'",
+        ],
+      },
+      restore: {
+        commands: [
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 < '/var/backups/agent-hub/rehearsal.sql'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && DATABASE_URL=\"$AGENT_HUB_RESTORE_DATABASE_URL\" npm run db:migrate -w @agent-hub/server",
+        ],
+      },
+      verify: {
+        commands: [
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS projects FROM projects;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS agents FROM agents;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS executions FROM executions;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS traces FROM traces;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS executions_with_missing_agents FROM executions e LEFT JOIN agents a ON a.id = e.agent_id WHERE a.id IS NULL;'",
+          "set -a && . '/etc/agent-hub/agent-hub.env' && set +a && psql \"$AGENT_HUB_RESTORE_DATABASE_URL\" -v ON_ERROR_STOP=1 -c 'SELECT count(*) AS traces_with_missing_executions FROM traces t LEFT JOIN executions e ON e.id = t.execution_id WHERE e.id IS NULL;'",
+        ],
+      },
+      warnings: [],
+    });
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();
