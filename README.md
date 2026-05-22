@@ -257,6 +257,7 @@ node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interv
 node packages/sdk/dist/cli.js ops recovery-plan --project oph --backup-dir /var/backups/agent-hub
 node packages/sdk/dist/cli.js ops recovery-drill-plan --project oph --backup-dir /var/backups/agent-hub
 node packages/sdk/dist/cli.js ops recovery-drill run --project oph --yes-reset-restore-db
+node packages/sdk/dist/cli.js ops release-check --project oph --canary-agent enrich_repo --observe-iterations 2 --observe-interval-ms 300000
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -340,6 +341,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `ops recovery-drill run --project <name-or-id> --yes-reset-restore-db` executes that restore rehearsal and returns a structured command-by-command report. The confirmation flag is required because the restore database schema is dropped and recreated. The command refuses to continue if `DATABASE_URL` and `AGENT_HUB_RESTORE_DATABASE_URL` are missing or equal.
 
+`ops release-check --project <name-or-id>` runs the release gate for agent-driven deployment: doctor, warning-aware ops status, optional recovery drill, optional canary, and observation. It returns a step-by-step report and exits non-zero if any executed step fails. Add `--include-recovery-drill --yes-reset-restore-db` when a disposable restore database is configured, and `--canary-agent <name>` when an executor can safely run a smoke job.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
@@ -399,6 +402,7 @@ Exposed tools:
 - `agent_hub_get_recovery_plan`
 - `agent_hub_get_recovery_drill_plan`
 - `agent_hub_run_recovery_drill`
+- `agent_hub_run_release_check`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

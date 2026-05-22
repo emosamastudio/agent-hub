@@ -407,6 +407,34 @@ export interface AgentHubRunRecoveryDrillReport {
   failedCommand?: AgentHubRecoveryDrillCommandResult;
 }
 
+export interface AgentHubReleaseCheckOptions extends AgentHubRunRecoveryDrillOptions, AgentHubOpsStatusOptions {
+  includeRecoveryDrill?: boolean;
+  canaryAgent?: string;
+  canaryPayload?: Record<string, unknown>;
+  canaryTimeoutMs?: number;
+  canaryIntervalMs?: number;
+  observeIterations?: number;
+  observeIntervalMs?: number;
+  skipObserve?: boolean;
+}
+
+export interface AgentHubReleaseCheckStep {
+  name: "doctor" | "ops_status" | "recovery_drill" | "canary" | "observe";
+  ok: boolean;
+  skipped: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export interface AgentHubReleaseCheckReport {
+  ok: boolean;
+  startedAt: string;
+  finishedAt: string;
+  serverUrl: string;
+  project?: string;
+  steps: AgentHubReleaseCheckStep[];
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -576,6 +604,11 @@ function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): stri
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function releaseCheckStepOk(result: unknown, fallback = true): boolean {
+  const ok = objectRecord(result)?.ok;
+  return typeof ok === "boolean" ? ok : fallback;
 }
 
 function runShellCommand(
@@ -1042,6 +1075,79 @@ export class AgentHubControlClient {
       finishedAt: new Date().toISOString(),
       plan,
       commands,
+    };
+  }
+
+  async runReleaseCheck(options: AgentHubReleaseCheckOptions = {}): Promise<AgentHubReleaseCheckReport> {
+    const startedAt = new Date().toISOString();
+    const failOnWarning = options.failOnWarning ?? true;
+    const steps: AgentHubReleaseCheckStep[] = [];
+
+    const runStep = async (
+      name: AgentHubReleaseCheckStep["name"],
+      task: () => Promise<unknown>,
+      okSelector: (result: unknown) => boolean = releaseCheckStepOk,
+    ) => {
+      try {
+        const result = await task();
+        const ok = okSelector(result);
+        steps.push({ name, ok, skipped: false, result });
+      } catch (error) {
+        steps.push({ name, ok: false, skipped: false, error: errorMessage(error) });
+      }
+    };
+
+    await runStep("doctor", async () => this.doctor(options.project ? { project: options.project } : {}), (result) => {
+      const report = result as AgentHubDoctorReport;
+      return report.ok && (failOnWarning ? report.summary.warnings === 0 : true);
+    });
+
+    await runStep("ops_status", async () => this.getOpsStatus({
+      project: options.project,
+      alertLimit: options.alertLimit,
+      executionLimit: options.executionLimit,
+      failOnWarning,
+    }));
+
+    if (options.includeRecoveryDrill === true) {
+      await runStep("recovery_drill", async () => this.runRecoveryDrill(options));
+    } else {
+      steps.push({ name: "recovery_drill", ok: true, skipped: true });
+    }
+
+    if (options.canaryAgent) {
+      await runStep("canary", async () => this.runCanary(options.canaryAgent as string, {
+        project: options.project,
+        payload: options.canaryPayload,
+        timeoutMs: options.canaryTimeoutMs,
+        intervalMs: options.canaryIntervalMs,
+        dedupPolicy: "allow_duplicate",
+        requireSuccess: true,
+      }));
+    } else {
+      steps.push({ name: "canary", ok: true, skipped: true });
+    }
+
+    if (options.skipObserve === true) {
+      steps.push({ name: "observe", ok: true, skipped: true });
+    } else {
+      await runStep("observe", async () => this.observeOpsStatus({
+        project: options.project,
+        alertLimit: options.alertLimit,
+        executionLimit: options.executionLimit,
+        failOnWarning,
+        iterations: options.observeIterations ?? 2,
+        intervalMs: options.observeIntervalMs ?? 5 * 60 * 1000,
+      }));
+    }
+
+    return {
+      ok: steps.every((step) => step.ok),
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      serverUrl: this.config.serverUrl,
+      project: options.project,
+      steps,
     };
   }
 

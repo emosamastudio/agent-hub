@@ -15,6 +15,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_get_recovery_plan",
       "agent_hub_get_recovery_drill_plan",
       "agent_hub_run_recovery_drill",
+      "agent_hub_run_release_check",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -290,6 +291,47 @@ describe("Agent Hub MCP tools", () => {
       restoreDatabaseUrlConfigured: true,
       databaseUrlConfigured: true,
       commandTimeoutMs: 60000,
+    });
+  });
+
+  test("release check tool forwards gate options", async () => {
+    const runReleaseCheck = vi.fn(async () => ({
+      ok: true,
+      steps: [{ name: "doctor", ok: true, skipped: false }],
+    }));
+    const tools = createAgentHubMcpTools({ runReleaseCheck } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_run_release_check")?.handler({
+      project: "oph",
+      includeRecoveryDrill: true,
+      confirmRestoreDatabaseReset: true,
+      canaryAgent: "enrich_repo",
+      canaryPayload: { repo_name: "agent-hub-smoke" },
+      observeIterations: 1,
+      observeIntervalMs: 0,
+      executionLimit: 5,
+      failOnWarning: true,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            steps: [{ name: "doctor", ok: true, skipped: false }],
+          }, null, 2),
+        },
+      ],
+    });
+    expect(runReleaseCheck).toHaveBeenCalledWith({
+      project: "oph",
+      includeRecoveryDrill: true,
+      confirmRestoreDatabaseReset: true,
+      canaryAgent: "enrich_repo",
+      canaryPayload: { repo_name: "agent-hub-smoke" },
+      observeIterations: 1,
+      observeIntervalMs: 0,
+      executionLimit: 5,
+      failOnWarning: true,
     });
   });
 

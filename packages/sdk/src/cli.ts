@@ -23,6 +23,7 @@ import {
   type AgentHubOpsStatusOptions,
   type AgentHubRecoveryDrillPlanOptions,
   type AgentHubRecoveryPlanOptions,
+  type AgentHubReleaseCheckOptions,
   type AgentHubRunRecoveryDrillOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
@@ -50,6 +51,8 @@ interface CliRecoveryDrillPlanOptions extends AgentHubRecoveryDrillPlanOptions {
 
 interface CliRunRecoveryDrillOptions extends AgentHubRunRecoveryDrillOptions {}
 
+interface CliReleaseCheckOptions extends AgentHubReleaseCheckOptions {}
+
 interface CliMcpConfigOptions {
   name?: string;
   command?: string;
@@ -67,6 +70,7 @@ type CliInvocation =
   | { command: "ops:recovery-plan"; options: CliRecoveryPlanOptions }
   | { command: "ops:recovery-drill-plan"; options: CliRecoveryDrillPlanOptions }
   | { command: "ops:recovery-drill:run"; options: CliRunRecoveryDrillOptions }
+  | { command: "ops:release-check"; options: CliReleaseCheckOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -223,6 +227,31 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
           executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
           commandTimeoutMs: positiveNumberFlag(parsed.flags, "command-timeout-ms"),
           confirmRestoreDatabaseReset: parsed.flags["yes-reset-restore-db"] === true ? true : undefined,
+        }),
+      };
+    }
+    if (subcommand === "release-check") {
+      return {
+        command: "ops:release-check",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+          failOnWarning: parsed.flags["allow-warning"] === true ? false : true,
+          includeRecoveryDrill: parsed.flags["include-recovery-drill"] === true ? true : undefined,
+          confirmRestoreDatabaseReset: parsed.flags["yes-reset-restore-db"] === true ? true : undefined,
+          backupDir: stringFlag(parsed.flags, "backup-dir"),
+          backupFile: stringFlag(parsed.flags, "backup-file"),
+          envFile: stringFlag(parsed.flags, "env-file"),
+          restoreDatabaseEnvVar: stringFlag(parsed.flags, "restore-database-env-var"),
+          commandTimeoutMs: positiveNumberFlag(parsed.flags, "command-timeout-ms"),
+          canaryAgent: stringFlag(parsed.flags, "canary-agent"),
+          canaryPayload: parsePayload(stringFlag(parsed.flags, "canary-payload")),
+          canaryTimeoutMs: positiveNumberFlag(parsed.flags, "canary-timeout-ms"),
+          canaryIntervalMs: numberFlag(parsed.flags, "canary-interval-ms"),
+          observeIterations: positiveNumberFlag(parsed.flags, "observe-iterations"),
+          observeIntervalMs: numberFlag(parsed.flags, "observe-interval-ms"),
+          skipObserve: parsed.flags["skip-observe"] === true ? true : undefined,
         }),
       };
     }
@@ -621,6 +650,12 @@ export async function runCli(
           databaseUrlConfigured: Boolean(env.DATABASE_URL),
           restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
         })
+      : invocation.command === "ops:release-check"
+        ? await client.runReleaseCheck({
+          ...invocation.options,
+          databaseUrlConfigured: Boolean(env.DATABASE_URL),
+          restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
+        })
       : await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (strictInvocationFailed(invocation, result)) {
@@ -640,10 +675,14 @@ function strictInvocationFailed(invocation: CliInvocation, result: unknown): boo
     && resultOk(result) === false) {
     return true;
   }
-  return invocation.command === "ops:recovery-drill:run" && resultOk(result) === false;
+  return (invocation.command === "ops:recovery-drill:run" || invocation.command === "ops:release-check")
+    && resultOk(result) === false;
 }
 
 function strictFailureMessage(invocation: CliInvocation): string {
+  if (invocation.command === "ops:release-check") {
+    return "Agent Hub release check failed";
+  }
   if (invocation.command === "ops:recovery-drill:run") {
     return "Agent Hub recovery drill failed";
   }
@@ -696,6 +735,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.getRecoveryDrillPlan(invocation.options);
     case "ops:recovery-drill:run":
       return client.runRecoveryDrill(invocation.options);
+    case "ops:release-check":
+      return client.runReleaseCheck(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -928,6 +969,7 @@ function helpText(): string {
   agent-hub ops recovery-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--service-name agent-hub] [--env-file /etc/agent-hub/agent-hub.env]
   agent-hub ops recovery-drill-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL]
   agent-hub ops recovery-drill run --yes-reset-restore-db [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL] [--command-timeout-ms 600000]
+  agent-hub ops release-check [--project <project-name-or-id>] [--include-recovery-drill --yes-reset-restore-db] [--canary-agent <agent-name>] [--observe-iterations 2] [--observe-interval-ms 300000] [--skip-observe] [--allow-warning]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

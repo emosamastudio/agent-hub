@@ -1317,6 +1317,103 @@ describe("AgentHubControlClient", () => {
     ]);
   });
 
+  test("runReleaseCheck aggregates doctor, ops status, recovery drill, canary, and observe gates", async () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+    const calls: string[] = [];
+    vi.spyOn(client, "doctor").mockImplementation(async () => {
+      calls.push("doctor");
+      return {
+        ok: true,
+        generatedAt: "2026-05-22T00:00:00.000Z",
+        serverUrl: "http://hub",
+        summary: { errors: 0, warnings: 0 },
+        checks: [],
+      };
+    });
+    vi.spyOn(client, "getOpsStatus").mockImplementation(async () => {
+      calls.push("ops-status");
+      return {
+        ok: true,
+        generatedAt: "2026-05-22T00:00:00.000Z",
+        serverUrl: "http://hub",
+        summary: {
+          errors: 0,
+          warnings: 0,
+          schedulerRunning: true,
+          agentsTotal: 1,
+          agentsOnline: 1,
+          executorsOnline: 1,
+          activeAlerts: 0,
+          executionsQueued: 0,
+          executionsRunning: 0,
+          executionsFailed: 0,
+          executionsTimeout: 0,
+        },
+        doctor: {} as any,
+        agents: [],
+        executors: [],
+        executions: { queued: [], running: [], failed: [], timeout: [] },
+        alerts: [],
+      };
+    });
+    vi.spyOn(client, "runRecoveryDrill").mockImplementation(async () => {
+      calls.push("recovery-drill");
+      return {
+        ok: true,
+        startedAt: "2026-05-22T00:00:00.000Z",
+        finishedAt: "2026-05-22T00:00:01.000Z",
+        plan: {} as any,
+        commands: [],
+      };
+    });
+    vi.spyOn(client, "runCanary").mockImplementation(async () => {
+      calls.push("canary");
+      return {
+        preflight: {} as any,
+        trigger: { execution_id: "execution-1", status: "queued" },
+        execution: { id: "execution-1", status: "success" },
+        postflight: {} as any,
+      };
+    });
+    vi.spyOn(client, "observeOpsStatus").mockImplementation(async () => {
+      calls.push("observe");
+      return {
+        ok: true,
+        startedAt: "2026-05-22T00:00:00.000Z",
+        finishedAt: "2026-05-22T00:00:01.000Z",
+        iterations: 1,
+        failedIterations: 0,
+        snapshots: [],
+      };
+    });
+
+    const report = await client.runReleaseCheck({
+      project: "oph",
+      includeRecoveryDrill: true,
+      confirmRestoreDatabaseReset: true,
+      canaryAgent: "enrich_repo",
+      canaryPayload: { repo_name: "agent-hub-smoke" },
+      observeIterations: 1,
+      observeIntervalMs: 0,
+      executionLimit: 5,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(calls).toEqual(["doctor", "ops-status", "recovery-drill", "canary", "observe"]);
+    expect(report.steps.map((step) => ({ name: step.name, ok: step.ok, skipped: step.skipped }))).toEqual([
+      { name: "doctor", ok: true, skipped: false },
+      { name: "ops_status", ok: true, skipped: false },
+      { name: "recovery_drill", ok: true, skipped: false },
+      { name: "canary", ok: true, skipped: false },
+      { name: "observe", ok: true, skipped: false },
+    ]);
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();

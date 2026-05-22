@@ -170,6 +170,43 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses ops release check gate", () => {
+    expect(parseCliInvocation([
+      "ops",
+      "release-check",
+      "--project",
+      "oph",
+      "--include-recovery-drill",
+      "--yes-reset-restore-db",
+      "--canary-agent",
+      "enrich_repo",
+      "--canary-payload",
+      "{\"repo_name\":\"agent-hub-smoke\"}",
+      "--observe-iterations",
+      "1",
+      "--observe-interval-ms",
+      "0",
+      "--execution-limit",
+      "5",
+      "--command-timeout-ms",
+      "60000",
+    ])).toEqual({
+      command: "ops:release-check",
+      options: {
+        project: "oph",
+        includeRecoveryDrill: true,
+        confirmRestoreDatabaseReset: true,
+        canaryAgent: "enrich_repo",
+        canaryPayload: { repo_name: "agent-hub-smoke" },
+        observeIterations: 1,
+        observeIntervalMs: 0,
+        executionLimit: 5,
+        commandTimeoutMs: 60000,
+        failOnWarning: true,
+      },
+    });
+  });
+
   test("parses project drain invocations", () => {
     expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
       command: "projects:drain",

@@ -225,6 +225,30 @@ The `--yes-reset-restore-db` flag is intentionally required because the command
 drops and recreates the restore database schema. Only use it after confirming
 `AGENT_HUB_RESTORE_DATABASE_URL` points at the disposable restore database.
 
+For a single release gate that a coding agent or rollout script can run before
+and after deployment:
+
+```bash
+node packages/sdk/dist/cli.js ops release-check \
+  --project oph \
+  --canary-agent enrich_repo \
+  --observe-iterations 2 \
+  --observe-interval-ms 300000
+```
+
+When the disposable restore database is configured, include the recovery drill
+in the same gate:
+
+```bash
+node packages/sdk/dist/cli.js ops release-check \
+  --project oph \
+  --include-recovery-drill \
+  --yes-reset-restore-db \
+  --canary-agent enrich_repo \
+  --observe-iterations 2 \
+  --observe-interval-ms 300000
+```
+
 Before an upgrade:
 
 ```bash
