@@ -13,6 +13,15 @@ interface DashboardAuthRuntime {
   encode(value: string): string;
 }
 
+interface DashboardAuthEnv {
+  DEV?: boolean;
+  VITE_AGENT_HUB_DASHBOARD_PASSWORD?: string;
+}
+
+export function resolveDashboardDefaultPassword(env: DashboardAuthEnv): string | undefined {
+  return env.VITE_AGENT_HUB_DASHBOARD_PASSWORD ?? (env.DEV === true ? "admin" : undefined);
+}
+
 export function buildDashboardAuthHeaders(runtime: DashboardAuthRuntime): Record<string, string> {
   const cachedPassword = runtime.storage.getItem(DASHBOARD_PASSWORD_STORAGE_KEY);
   const password = runtime.defaultPassword
@@ -31,7 +40,7 @@ export function buildDashboardAuthHeaders(runtime: DashboardAuthRuntime): Record
 export function authHeaders(): Record<string, string> {
   return buildDashboardAuthHeaders({
     username: import.meta.env.VITE_AGENT_HUB_DASHBOARD_USER ?? "admin",
-    defaultPassword: import.meta.env.VITE_AGENT_HUB_DASHBOARD_PASSWORD ?? "admin",
+    defaultPassword: resolveDashboardDefaultPassword(import.meta.env),
     storage: window.sessionStorage,
     prompt: window.prompt.bind(window),
     encode: window.btoa.bind(window),

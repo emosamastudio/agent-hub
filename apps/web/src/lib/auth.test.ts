@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { buildDashboardAuthHeaders } from "./auth";
+import { buildDashboardAuthHeaders, resolveDashboardDefaultPassword } from "./auth";
 
 function createStorage(initial?: string) {
   const values = new Map<string, string>();
@@ -15,6 +15,12 @@ function createStorage(initial?: string) {
 }
 
 describe("dashboard auth headers", () => {
+  test("uses the development password only outside production builds", () => {
+    expect(resolveDashboardDefaultPassword({ DEV: true })).toBe("admin");
+    expect(resolveDashboardDefaultPassword({ DEV: false })).toBeUndefined();
+    expect(resolveDashboardDefaultPassword({ DEV: false, VITE_AGENT_HUB_DASHBOARD_PASSWORD: "secret" })).toBe("secret");
+  });
+
   test("uses a configured default password without prompting", () => {
     const storage = createStorage();
     const prompt = vi.fn(() => "secret-password");
