@@ -233,7 +233,8 @@ node packages/sdk/dist/cli.js ops release-check \
   --project oph \
   --canary-agent enrich_repo \
   --observe-iterations 2 \
-  --observe-interval-ms 300000
+  --observe-interval-ms 300000 \
+  --output-file /var/log/agent-hub/release-check-oph.json
 ```
 
 When the disposable restore database is configured, include the recovery drill
@@ -246,7 +247,8 @@ node packages/sdk/dist/cli.js ops release-check \
   --yes-reset-restore-db \
   --canary-agent enrich_repo \
   --observe-iterations 2 \
-  --observe-interval-ms 300000
+  --observe-interval-ms 300000 \
+  --output-file /var/log/agent-hub/release-check-oph.json
 ```
 
 Before an upgrade:

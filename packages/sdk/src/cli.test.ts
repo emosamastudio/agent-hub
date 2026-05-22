@@ -1,5 +1,9 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { buildControlConfig, parseCliInvocation, runCli } from "./cli";
+import { AgentHubControlClient, type AgentHubReleaseCheckReport } from "./index";
 
 describe("agent-hub CLI", () => {
   afterEach(() => {
@@ -190,8 +194,11 @@ describe("agent-hub CLI", () => {
       "5",
       "--command-timeout-ms",
       "60000",
+      "--output-file",
+      "/var/log/agent-hub/release-check.json",
     ])).toEqual({
       command: "ops:release-check",
+      outputFile: "/var/log/agent-hub/release-check.json",
       options: {
         project: "oph",
         includeRecoveryDrill: true,
@@ -205,6 +212,52 @@ describe("agent-hub CLI", () => {
         failOnWarning: true,
       },
     });
+  });
+
+  test("writes release check reports to an output file", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "agent-hub-cli-"));
+    const outputFile = join(tmp, "release-check.json");
+    const report: AgentHubReleaseCheckReport = {
+      ok: true,
+      startedAt: "2026-05-22T10:00:00.000Z",
+      finishedAt: "2026-05-22T10:05:00.000Z",
+      serverUrl: "http://hub",
+      project: "oph",
+      steps: [
+        { name: "doctor", ok: true, skipped: false, result: { ok: true } },
+      ],
+    };
+    const runReleaseCheck = vi.spyOn(AgentHubControlClient.prototype, "runReleaseCheck").mockResolvedValue(report);
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    try {
+      await expect(runCli([
+        "ops",
+        "release-check",
+        "--project",
+        "oph",
+        "--skip-observe",
+        "--output-file",
+        outputFile,
+      ], {
+        AGENT_HUB_URL: "http://hub",
+        AGENT_HUB_API_KEY: "dev-key",
+      }, { stdout, stderr })).resolves.toBe(0);
+
+      expect(stderr.text).toBe("");
+      expect(JSON.parse(stdout.text)).toEqual(report);
+      expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual(report);
+      expect(runReleaseCheck).toHaveBeenCalledWith(expect.objectContaining({
+        project: "oph",
+        skipObserve: true,
+      }));
+      expect(runReleaseCheck).not.toHaveBeenCalledWith(expect.objectContaining({
+        outputFile,
+      }));
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 
   test("parses project drain invocations", () => {

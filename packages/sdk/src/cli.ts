@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AgentHubControlClient,
@@ -70,7 +72,7 @@ type CliInvocation =
   | { command: "ops:recovery-plan"; options: CliRecoveryPlanOptions }
   | { command: "ops:recovery-drill-plan"; options: CliRecoveryDrillPlanOptions }
   | { command: "ops:recovery-drill:run"; options: CliRunRecoveryDrillOptions }
-  | { command: "ops:release-check"; options: CliReleaseCheckOptions }
+  | { command: "ops:release-check"; options: CliReleaseCheckOptions; outputFile?: string }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -233,6 +235,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
     if (subcommand === "release-check") {
       return {
         command: "ops:release-check",
+        outputFile: stringFlag(parsed.flags, "output-file"),
         options: compactDefined({
           project: stringFlag(parsed.flags, "project"),
           alertLimit: positiveNumberFlag(parsed.flags, "alert-limit"),
@@ -657,7 +660,9 @@ export async function runCli(
           restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
         })
       : await executeInvocation(client, invocation);
-    io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    const output = `${JSON.stringify(result, null, 2)}\n`;
+    await writeInvocationOutputFile(invocation, output);
+    io.stdout.write(output);
     if (strictInvocationFailed(invocation, result)) {
       io.stderr.write(`${strictFailureMessage(invocation)}\n`);
       return 1;
@@ -667,6 +672,14 @@ export async function runCli(
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+async function writeInvocationOutputFile(invocation: CliInvocation, output: string): Promise<void> {
+  if (invocation.command !== "ops:release-check" || !invocation.outputFile) {
+    return;
+  }
+  await mkdir(dirname(invocation.outputFile), { recursive: true });
+  await writeFile(invocation.outputFile, output, "utf8");
 }
 
 function strictInvocationFailed(invocation: CliInvocation, result: unknown): boolean {
@@ -969,7 +982,7 @@ function helpText(): string {
   agent-hub ops recovery-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--service-name agent-hub] [--env-file /etc/agent-hub/agent-hub.env]
   agent-hub ops recovery-drill-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL]
   agent-hub ops recovery-drill run --yes-reset-restore-db [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL] [--command-timeout-ms 600000]
-  agent-hub ops release-check [--project <project-name-or-id>] [--include-recovery-drill --yes-reset-restore-db] [--canary-agent <agent-name>] [--observe-iterations 2] [--observe-interval-ms 300000] [--skip-observe] [--allow-warning]
+  agent-hub ops release-check [--project <project-name-or-id>] [--include-recovery-drill --yes-reset-restore-db] [--canary-agent <agent-name>] [--observe-iterations 2] [--observe-interval-ms 300000] [--output-file <path>] [--skip-observe] [--allow-warning]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]
