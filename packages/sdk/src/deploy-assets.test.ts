@@ -52,4 +52,23 @@ describe("production deployment assets", () => {
     expect(script).toContain("postgres:16-alpine");
     expect(script).not.toContain("echo \"$value\"");
   });
+
+  test("provide a Docker Compose deployment script with readiness and release gates", async () => {
+    const scriptPath = resolve(repoRoot, "deploy/deploy-compose.sh");
+    const script = await readFile(scriptPath, "utf8");
+    await expect(execFileAsync("bash", ["-n", scriptPath])).resolves.toBeTruthy();
+    const { stdout } = await execFileAsync("bash", [scriptPath, "--help"]);
+
+    expect(stdout).toContain("--release-check-project");
+    expect(stdout).toContain("--skip-release-check");
+    expect(script).toContain("set -euo pipefail");
+    expect(script).toContain("preflight-compose.sh");
+    expect(script).toContain("docker compose");
+    expect(script).toContain("up -d --build");
+    expect(script).toContain("/api/ready");
+    expect(script).toContain("ops release-check");
+    expect(script).toContain("AGENT_HUB_API_KEY=\"${AGENT_HUB_API_KEY:-$AGENT_HUB_DEFAULT_API_KEY}\"");
+    expect(script).toContain("docker compose logs --tail=100 agent-hub");
+    expect(script).not.toContain("set -x");
+  });
 });

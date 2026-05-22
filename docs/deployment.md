@@ -41,15 +41,18 @@ For the Compose deployment, `DATABASE_URL` is injected as
 `deploy/docker-compose.production.yml`; the local value in the env file is only
 used by non-containerized commands.
 
-Build, migrate, and start:
+Deploy, wait for readiness, and run the fast release gate:
 
 ```bash
-deploy/preflight-compose.sh --env-file /etc/agent-hub/agent-hub.env
-docker compose \
+deploy/deploy-compose.sh \
   --env-file /etc/agent-hub/agent-hub.env \
-  -f deploy/docker-compose.production.yml \
-  up -d --build
+  --release-check-project oph \
+  --release-check-output /var/log/agent-hub/release-check-oph.json
 ```
+
+Use `deploy/preflight-compose.sh` directly when you want a read-only host check
+before changing anything. Use raw `docker compose` commands only for debugging
+or explicit manual rollout control.
 
 Verify:
 
@@ -88,16 +91,16 @@ cd ~/workspace/agent-hub
 sudo install -d -m 0750 /etc/agent-hub
 sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
 sudo editor /etc/agent-hub/agent-hub.env
-deploy/preflight-compose.sh --env-file /etc/agent-hub/agent-hub.env
-docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml up -d --build
+deploy/deploy-compose.sh --env-file /etc/agent-hub/agent-hub.env --release-check-project oph --release-check-output /var/log/agent-hub/release-check-oph.json
 curl -fsS http://127.0.0.1:8788/api/ready
 ```
 
 If Docker Hub access fails while pulling `node:22-bookworm-slim` or
 `postgres:16-alpine`, configure Docker daemon proxy on `emoworklaptop` or load
 prebuilt images before running Compose. Use
-`deploy/preflight-compose.sh --skip-image-pull` only when the required images
-are already present or will be loaded out of band.
+`deploy/preflight-compose.sh --skip-image-pull` or
+`deploy/deploy-compose.sh --skip-image-pull` only when the required images are
+already present or will be loaded out of band.
 
 ## Environment
 
