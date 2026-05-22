@@ -44,6 +44,7 @@ used by non-containerized commands.
 Build, migrate, and start:
 
 ```bash
+deploy/preflight-compose.sh --env-file /etc/agent-hub/agent-hub.env
 docker compose \
   --env-file /etc/agent-hub/agent-hub.env \
   -f deploy/docker-compose.production.yml \
@@ -87,13 +88,16 @@ cd ~/workspace/agent-hub
 sudo install -d -m 0750 /etc/agent-hub
 sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
 sudo editor /etc/agent-hub/agent-hub.env
+deploy/preflight-compose.sh --env-file /etc/agent-hub/agent-hub.env
 docker compose --env-file /etc/agent-hub/agent-hub.env -f deploy/docker-compose.production.yml up -d --build
 curl -fsS http://127.0.0.1:8788/api/ready
 ```
 
 If Docker Hub access fails while pulling `node:22-bookworm-slim` or
 `postgres:16-alpine`, configure Docker daemon proxy on `emoworklaptop` or load
-prebuilt images before running Compose.
+prebuilt images before running Compose. Use
+`deploy/preflight-compose.sh --skip-image-pull` only when the required images
+are already present or will be loaded out of band.
 
 ## Environment
 

@@ -1,8 +1,11 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const repoRoot = resolve(__dirname, "../../..");
+const execFileAsync = promisify(execFile);
 
 describe("production deployment assets", () => {
   test("provide a Docker image for hosts without a modern Node runtime", async () => {
@@ -27,5 +30,26 @@ describe("production deployment assets", () => {
     expect(compose).toContain("\"8788:8788\"");
     expect(compose).toContain("agent-hub-postgres-data");
     expect(compose).toContain("http://127.0.0.1:8788/api/ready");
+  });
+
+  test("provide a safe Docker Compose preflight script for target deployment", async () => {
+    const scriptPath = resolve(repoRoot, "deploy/preflight-compose.sh");
+    const script = await readFile(scriptPath, "utf8");
+    await expect(execFileAsync("bash", ["-n", scriptPath])).resolves.toBeTruthy();
+    const { stdout } = await execFileAsync("bash", [scriptPath, "--help"]);
+
+    expect(stdout).toContain("--env-file");
+    expect(stdout).toContain("--skip-image-pull");
+    expect(script).toContain("set -euo pipefail");
+    expect(script).toContain("docker compose version");
+    expect(script).toContain("AGENT_HUB_POSTGRES_PASSWORD");
+    expect(script).toContain("AGENT_HUB_DASHBOARD_PASSWORD");
+    expect(script).toContain("AGENT_HUB_DEFAULT_API_KEY");
+    expect(script).toContain("replace-me");
+    expect(script).toContain("agent_hub_dev_key");
+    expect(script).toContain("127.0.0.1:${port}/api/ready");
+    expect(script).toContain("node:22-bookworm-slim");
+    expect(script).toContain("postgres:16-alpine");
+    expect(script).not.toContain("echo \"$value\"");
   });
 });
