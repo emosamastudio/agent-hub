@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import {
   acknowledgeAlert,
   cancelExecution,
@@ -221,6 +230,507 @@ interface ExecutionLoadOptions extends ExecutionQueryOptions {
 
 const EXECUTION_PAGE_SIZE = DEFAULT_EXECUTION_PAGE_SIZE;
 const DEFAULT_TRIGGER_PAYLOAD_TEXT = '{\n  "source": "dashboard"\n}';
+const DASHBOARD_LANGUAGE_STORAGE_KEY = "agent-hub.dashboard.language";
+
+export type DashboardLanguage = "zh" | "en";
+
+const DASHBOARD_TRANSLATIONS = {
+  zh: {
+    "language.toggleAria": "切换 Dashboard 语言",
+    "language.zh": "中文",
+    "language.en": "English",
+    "product.name": "Agent Hub",
+    "product.sidebarName": "Agent Hub",
+    "product.subtitle": "监控、调度并触发跨项目 AI Agent 任务。",
+    "product.sidebarSubtitle": "从一个 Dashboard 监控、调度和触发 AI Agent。",
+    "nav.aria": "页面导航",
+    "nav.controlPlane": "本地优先控制平面",
+    "nav.workspace": "工作区",
+    "nav.detail": "详情",
+    "nav.overview": "概览",
+    "nav.overviewDescription": "Agent 健康、调度状态和近期活动总览。",
+    "nav.agents": "Agents",
+    "nav.agentsDescription": "查看 Agent、cron 调度和手动触发入口。",
+    "nav.executions": "执行记录",
+    "nav.executionsDescription": "查看所有 Agent 的完整执行历史。",
+    "nav.executionDetail": "执行详情",
+    "nav.agentDetail": "Agent 详情",
+    "status.liveLocal": "本地运行",
+    "status.loading": "加载中...",
+    "socket.open": "WebSocket 在线",
+    "socket.connecting": "WebSocket 连接中",
+    "socket.reconnecting": "WebSocket 重连中",
+    "socket.error": "WebSocket 异常",
+    "actions.refresh": "刷新快照",
+    "actions.retryNow": "立即重试",
+    "actions.rerun": "重跑",
+    "actions.cancel": "取消",
+    "actions.open": "打开",
+    "actions.current": "当前",
+    "actions.viewRaw": "查看原始数据",
+    "actions.newAgent": "新建 Agent",
+    "actions.disable": "禁用",
+    "actions.enable": "启用",
+    "actions.run": "运行",
+    "actions.drain": "排空",
+    "actions.draining": "排空中...",
+    "actions.delete": "删除",
+    "actions.deleting": "删除中...",
+    "actions.saveSettings": "保存设置",
+    "actions.saving": "保存中...",
+    "actions.createAgent": "创建 Agent",
+    "actions.creating": "创建中...",
+    "actions.triggerNow": "立即触发",
+    "actions.triggering": "触发中...",
+    "actions.acknowledge": "确认",
+    "actions.acknowledging": "确认中...",
+    "error.loadData": "加载数据失败",
+    "error.dashboardSync": "Dashboard 同步异常",
+    "error.executionFilter": "执行筛选异常",
+    "error.updateAgentSettings": "更新 Agent 设置失败",
+    "error.noActiveProject": "没有可用项目。",
+    "error.agentRequired": "Agent 名称、显示名称和描述为必填项。",
+    "loading.dashboard": "正在加载 Dashboard...",
+    "stats.agents": "Agents",
+    "stats.online": "在线",
+    "stats.running": "运行中",
+    "stats.failed24h": "失败 (24h)",
+    "stats.onlineMeta": "在线",
+    "stats.totalPrefix": "共",
+    "stats.totalSuffix": "个",
+    "stats.activeExecutions": "活跃执行",
+    "stats.recentFailures": "近期失败",
+    "alerts.eyebrow": "告警",
+    "alerts.title": "运行告警",
+    "alerts.description": "来自失败、队列压力和超时的调度健康信号。",
+    "alerts.emptyTitle": "暂无活跃告警",
+    "alerts.emptyDescription": "调度器没有记录近期失败模式。",
+    "filters.eyebrow": "筛选",
+    "filters.title": "执行筛选",
+    "filters.description": "按 Agent、状态和触发来源过滤执行记录。",
+    "filters.agent": "Agent",
+    "filters.status": "状态",
+    "filters.trigger": "触发",
+    "filters.allAgents": "全部 Agent",
+    "filters.allStatuses": "全部状态",
+    "filters.allTriggers": "全部触发",
+    "filters.reset": "重置筛选",
+    "table.project": "项目",
+    "table.agent": "Agent",
+    "table.cron": "Cron",
+    "table.status": "状态",
+    "table.dispatch": "调度",
+    "table.schedule": "计划",
+    "table.queue": "队列",
+    "table.capacity": "容量",
+    "table.last10": "最近 10 次",
+    "table.actions": "操作",
+    "table.time": "时间",
+    "table.trigger": "触发",
+    "table.duration": "耗时",
+    "table.notReported": "未上报",
+    "table.manual": "手动",
+    "table.runningSuffix": "运行中",
+    "table.nextPrefix": "下次",
+    "table.pendingSuffix": "等待",
+    "table.freeSuffix": "空闲",
+    "executions.emptyTitle": "暂无执行记录",
+    "executions.emptyDescription": "触发 Agent 或等待 cron 调度后会产生执行记录。",
+    "executions.showingPrefix": "显示",
+    "executions.showingSuffix": "条执行记录",
+    "executions.loadMore": "加载更多",
+    "executions.allLoaded": "已全部加载",
+    "executionSummary.status": "状态",
+    "executionSummary.duration": "耗时",
+    "executionSummary.trigger": "触发",
+    "executionSummary.scheduled": "计划时间",
+    "executionSummary.started": "开始时间",
+    "executionSummary.created": "创建时间",
+    "executionSummary.tracesRecorded": "已记录 Trace",
+    "executionSummary.progress": "进度",
+    "executionSummary.agentId": "Agent ID",
+    "executionSummary.na": "N/A",
+    "agentDirectory.overviewEyebrow": "Agents",
+    "agentDirectory.statusTitle": "Agent 状态",
+    "agentDirectory.statusDescription": "所有已注册 Agent、执行器状态、调度和快捷操作。",
+    "agentDirectory.emptyTitle": "暂无 Agent",
+    "agentDirectory.emptyDescription": "Agent 接入或配置后会显示在这里。",
+    "agentDirectory.directoryEyebrow": "目录",
+    "agentDirectory.agentsTitle": "Agents",
+    "agentDirectory.agentsDescription": "每个 Agent 都有 cron 表达式、在线状态和近期执行点。",
+    "agentDirectory.archiveEyebrow": "归档",
+    "agentDirectory.archiveTitle": "已归档 Agent",
+    "agentDirectory.archiveDescription": "已归档 Agent 不再调度，但会保留执行历史。",
+    "agentDirectory.archiveEmptyTitle": "暂无已归档 Agent",
+    "agentDirectory.archiveEmptyDescription": "删除且没有活跃执行的 Agent 会显示在这里。",
+    "agentCreate.title": "新建 Agent",
+    "agentCreate.description": "在 Hub 中注册一个可调度 Agent。Worker 稍后可通过 SDK 接入。",
+    "agentCreate.project": "项目",
+    "agentCreate.type": "类型",
+    "agentCreate.name": "Agent 名称",
+    "agentCreate.displayName": "显示名称",
+    "agentCreate.descriptionLabel": "描述",
+    "agentCreate.handler": "Handler",
+    "agentCreate.concurrency": "并发",
+    "agentCreate.timeout": "超时",
+    "agentCreate.retries": "重试",
+    "agentCreate.queueCap": "队列上限",
+    "agentTrigger.title": "手动触发",
+    "agentTrigger.description": "用 Dashboard 提供的 payload 运行该 Agent。",
+    "agentTrigger.payload": "Payload JSON",
+    "agentSettings.title": "Agent 设置",
+    "agentSettings.description": "调度、队列、重试和幂等控制。",
+    "agentSettings.displayName": "显示名称",
+    "agentSettings.misfire": "错过调度",
+    "agentSettings.backoff": "退避",
+    "agentSettings.idempotency": "幂等窗口",
+    "payload.title": "输入载荷",
+    "payload.description": "本次执行入队时捕获的 payload。",
+    "executionsPage.eyebrow": "历史",
+    "executionsPage.title": "执行记录",
+    "executionsPage.description": "完整执行日志。点击任意行打开 trace viewer。",
+    "detail.backToExecutions": "返回执行记录",
+    "detail.executionTitle": "执行详情",
+    "detail.executionDescription": "本次执行的状态、时间和 trace spans。",
+    "detail.error": "错误",
+    "detail.result": "结果",
+    "triggerChain.title": "触发链",
+    "triggerChain.description": "与本次运行关联的上游和下游执行。",
+    "triggerChain.empty": "暂无关联执行。",
+    "traces.title": "Traces",
+    "traces.description": "本次执行捕获的 Span 级细节。",
+    "traces.emptyTitle": "暂无 Trace",
+    "traces.emptyDescription": "本次执行未产生 trace spans。",
+    "traces.input": "输入",
+    "traces.output": "输出",
+    "traces.turn": "轮次",
+    "traces.unknown": "未知",
+    "traces.inTokens": "输入",
+    "traces.outTokens": "输出",
+    "agentDetail.backToAgents": "返回 Agents",
+    "agentDetail.description": "Agent 配置、状态和近期执行。",
+    "agentDetail.type": "类型",
+    "agentDetail.cron": "Cron",
+    "agentDetail.status": "状态",
+    "agentDetail.executor": "执行器",
+    "agentDetail.activeExecutions": "活跃执行",
+    "agentDetail.lastHeartbeat": "最近心跳",
+    "agentDetail.archivedAt": "归档时间",
+    "agentDetail.archived": "已归档",
+    "agentDetail.enabled": "已启用",
+    "agentDetail.disabled": "已禁用",
+    "agentDetail.manualOnly": "仅手动触发",
+    "agentDetail.upcomingSchedule": "后续计划",
+    "agentDetail.loadingUpcoming": "正在加载后续运行...",
+    "agentDetail.runPrefix": "第",
+    "agentDetail.runSuffix": "次",
+    "agentDetail.noUpcoming": "调度器未返回后续运行。",
+    "agentDetail.manualDescription": "该 Agent 仅在手动触发或 API 调用时运行。",
+    "agentDetail.handler": "Handler",
+    "agentDetail.executorHost": "执行器主机",
+    "agentDetail.idempotencyWindow": "幂等窗口",
+    "agentDetail.recentExecutions": "近期执行",
+    "agentDetail.lastRunsPrefix": "最近运行：",
+    "footer.lastSync": "上次同步",
+    "footer.loading": "加载中...",
+    "footer.auth": "Dashboard 认证",
+    "confirm.drain": "要排空 Agent",
+    "confirm.drainDescription": "吗？队列中的执行会被取消，调度会被禁用。",
+    "confirm.cancelRunning": "同时取消该 Agent 的运行中执行吗：",
+    "confirm.delete": "要删除 Agent",
+    "confirm.deleteDescription": "吗？此操作不可撤销。",
+  },
+  en: {
+    "language.toggleAria": "Switch dashboard language",
+    "language.zh": "中文",
+    "language.en": "English",
+    "product.name": "Agent Hub",
+    "product.sidebarName": "Agent Hub",
+    "product.subtitle": "Monitor, schedule, and trigger cron-driven AI agents from a single dashboard.",
+    "product.sidebarSubtitle": "Monitor, schedule, and trigger cron-driven AI agents from a single dashboard.",
+    "nav.aria": "Page navigation",
+    "nav.controlPlane": "Local-first control plane",
+    "nav.workspace": "Workspace",
+    "nav.detail": "Detail",
+    "nav.overview": "Overview",
+    "nav.overviewDescription": "High-level snapshot of agent health and recent activity.",
+    "nav.agents": "Agents",
+    "nav.agentsDescription": "Browse agents, cron schedules, and trigger runs.",
+    "nav.executions": "Executions",
+    "nav.executionsDescription": "Full execution history across all agents.",
+    "nav.executionDetail": "Execution Detail",
+    "nav.agentDetail": "Agent Detail",
+    "status.liveLocal": "Live local",
+    "status.loading": "Loading...",
+    "socket.open": "WebSocket live",
+    "socket.connecting": "WebSocket connecting",
+    "socket.reconnecting": "WebSocket reconnecting",
+    "socket.error": "WebSocket error",
+    "actions.refresh": "Refresh snapshot",
+    "actions.retryNow": "Retry now",
+    "actions.rerun": "Rerun",
+    "actions.cancel": "Cancel",
+    "actions.open": "Open",
+    "actions.current": "Current",
+    "actions.viewRaw": "View raw",
+    "actions.newAgent": "New Agent",
+    "actions.disable": "Disable",
+    "actions.enable": "Enable",
+    "actions.run": "Run",
+    "actions.drain": "Drain",
+    "actions.draining": "Draining...",
+    "actions.delete": "Delete",
+    "actions.deleting": "Deleting...",
+    "actions.saveSettings": "Save Settings",
+    "actions.saving": "Saving...",
+    "actions.createAgent": "Create agent",
+    "actions.creating": "Creating...",
+    "actions.triggerNow": "Trigger Now",
+    "actions.triggering": "Triggering...",
+    "actions.acknowledge": "Acknowledge",
+    "actions.acknowledging": "Acknowledging...",
+    "error.loadData": "Failed to load data",
+    "error.dashboardSync": "Dashboard sync issue",
+    "error.executionFilter": "Execution filter issue",
+    "error.updateAgentSettings": "Failed to update agent settings",
+    "error.noActiveProject": "No active project is available.",
+    "error.agentRequired": "Agent name, display name, and description are required.",
+    "loading.dashboard": "Loading dashboard...",
+    "stats.agents": "Agents",
+    "stats.online": "Online",
+    "stats.running": "Running",
+    "stats.failed24h": "Failed (24h)",
+    "stats.onlineMeta": "online",
+    "stats.totalPrefix": "of",
+    "stats.totalSuffix": "total",
+    "stats.activeExecutions": "active executions",
+    "stats.recentFailures": "recent failures",
+    "alerts.eyebrow": "Alerts",
+    "alerts.title": "Operational Alerts",
+    "alerts.description": "Recent scheduler health signals from failed runs, queue pressure, and timeouts.",
+    "alerts.emptyTitle": "No active alerts",
+    "alerts.emptyDescription": "The scheduler has not recorded recent failure patterns.",
+    "filters.eyebrow": "Filters",
+    "filters.title": "Execution Filters",
+    "filters.description": "Filter the execution log by agent, status, and trigger source.",
+    "filters.agent": "Agent",
+    "filters.status": "Status",
+    "filters.trigger": "Trigger",
+    "filters.allAgents": "All agents",
+    "filters.allStatuses": "All statuses",
+    "filters.allTriggers": "All triggers",
+    "filters.reset": "Reset Filters",
+    "table.project": "Project",
+    "table.agent": "Agent",
+    "table.cron": "Cron",
+    "table.status": "Status",
+    "table.dispatch": "Dispatch",
+    "table.schedule": "Schedule",
+    "table.queue": "Queue",
+    "table.capacity": "Capacity",
+    "table.last10": "Last 10",
+    "table.actions": "Actions",
+    "table.time": "Time",
+    "table.trigger": "Trigger",
+    "table.duration": "Duration",
+    "table.notReported": "not reported",
+    "table.manual": "manual",
+    "table.runningSuffix": "running",
+    "table.nextPrefix": "next",
+    "table.pendingSuffix": "pending",
+    "table.freeSuffix": "free",
+    "executions.emptyTitle": "No executions yet",
+    "executions.emptyDescription": "Trigger an agent or wait for a cron schedule to produce executions.",
+    "executions.showingPrefix": "Showing",
+    "executions.showingSuffix": "executions",
+    "executions.loadMore": "Load More",
+    "executions.allLoaded": "All loaded",
+    "executionSummary.status": "Status",
+    "executionSummary.duration": "Duration",
+    "executionSummary.trigger": "Trigger",
+    "executionSummary.scheduled": "Scheduled",
+    "executionSummary.started": "Started",
+    "executionSummary.created": "Created",
+    "executionSummary.tracesRecorded": "Traces recorded",
+    "executionSummary.progress": "Progress",
+    "executionSummary.agentId": "Agent ID",
+    "executionSummary.na": "N/A",
+    "agentDirectory.overviewEyebrow": "Agents",
+    "agentDirectory.statusTitle": "Agent Status",
+    "agentDirectory.statusDescription": "All registered agents, executor status, schedules, and quick actions.",
+    "agentDirectory.emptyTitle": "No agents registered",
+    "agentDirectory.emptyDescription": "Agents will appear here once they connect or are configured.",
+    "agentDirectory.directoryEyebrow": "Directory",
+    "agentDirectory.agentsTitle": "Agents",
+    "agentDirectory.agentsDescription": "Each agent has a cron expression, online/offline status, and recent execution dots.",
+    "agentDirectory.archiveEyebrow": "Archive",
+    "agentDirectory.archiveTitle": "Archived Agents",
+    "agentDirectory.archiveDescription": "Archived agents are hidden from scheduling but keep execution history.",
+    "agentDirectory.archiveEmptyTitle": "No archived agents",
+    "agentDirectory.archiveEmptyDescription": "Deleted agents will appear here after they have no active executions.",
+    "agentCreate.title": "New Agent",
+    "agentCreate.description": "Register a schedulable agent in the hub. The worker process can attach later through the SDK.",
+    "agentCreate.project": "Project",
+    "agentCreate.type": "Type",
+    "agentCreate.name": "Agent name",
+    "agentCreate.displayName": "Display name",
+    "agentCreate.descriptionLabel": "Description",
+    "agentCreate.handler": "Handler",
+    "agentCreate.concurrency": "Concurrency",
+    "agentCreate.timeout": "Timeout",
+    "agentCreate.retries": "Retries",
+    "agentCreate.queueCap": "Queue cap",
+    "agentTrigger.title": "Manual Trigger",
+    "agentTrigger.description": "Run this agent with a dashboard-provided payload.",
+    "agentTrigger.payload": "Payload JSON",
+    "agentSettings.title": "Agent Settings",
+    "agentSettings.description": "Scheduling, queue, retry, and idempotency controls.",
+    "agentSettings.displayName": "Display name",
+    "agentSettings.misfire": "Misfire",
+    "agentSettings.backoff": "Backoff",
+    "agentSettings.idempotency": "Idempotency",
+    "payload.title": "Input Payload",
+    "payload.description": "Payload captured when this execution was queued.",
+    "executionsPage.eyebrow": "History",
+    "executionsPage.title": "Executions",
+    "executionsPage.description": "Full execution log. Click any row to open the trace viewer.",
+    "detail.backToExecutions": "Back to Executions",
+    "detail.executionTitle": "Execution Detail",
+    "detail.executionDescription": "Status, timing, and trace spans for this execution.",
+    "detail.error": "Error",
+    "detail.result": "Result",
+    "triggerChain.title": "Trigger Chain",
+    "triggerChain.description": "Upstream and downstream executions linked to this run.",
+    "triggerChain.empty": "No linked executions recorded.",
+    "traces.title": "Traces",
+    "traces.description": "Span-level details captured during this execution.",
+    "traces.emptyTitle": "No traces recorded",
+    "traces.emptyDescription": "This execution did not produce any trace spans.",
+    "traces.input": "Input",
+    "traces.output": "Output",
+    "traces.turn": "Turn",
+    "traces.unknown": "unknown",
+    "traces.inTokens": "in",
+    "traces.outTokens": "out",
+    "agentDetail.backToAgents": "Back to Agents",
+    "agentDetail.description": "Agent configuration, status, and recent executions.",
+    "agentDetail.type": "Type",
+    "agentDetail.cron": "Cron",
+    "agentDetail.status": "Status",
+    "agentDetail.executor": "Executor",
+    "agentDetail.activeExecutions": "Active executions",
+    "agentDetail.lastHeartbeat": "Last heartbeat",
+    "agentDetail.archivedAt": "Archived at",
+    "agentDetail.archived": "Archived",
+    "agentDetail.enabled": "Enabled",
+    "agentDetail.disabled": "Disabled",
+    "agentDetail.manualOnly": "Manual trigger only",
+    "agentDetail.upcomingSchedule": "Upcoming Schedule",
+    "agentDetail.loadingUpcoming": "Loading upcoming runs...",
+    "agentDetail.runPrefix": "Run",
+    "agentDetail.runSuffix": "",
+    "agentDetail.noUpcoming": "No upcoming runs returned by the scheduler.",
+    "agentDetail.manualDescription": "This agent runs only when triggered manually or through the API.",
+    "agentDetail.handler": "Handler",
+    "agentDetail.executorHost": "Executor host",
+    "agentDetail.idempotencyWindow": "Idempotency window",
+    "agentDetail.recentExecutions": "Recent Executions",
+    "agentDetail.lastRunsPrefix": "Last runs for",
+    "footer.lastSync": "Last sync",
+    "footer.loading": "Loading...",
+    "footer.auth": "Dashboard auth",
+    "confirm.drain": "Drain agent",
+    "confirm.drainDescription": "? Queued executions will be cancelled and scheduling will be disabled.",
+    "confirm.cancelRunning": "Also cancel running executions for",
+    "confirm.delete": "Delete agent",
+    "confirm.deleteDescription": "? This cannot be undone.",
+  },
+} as const;
+
+type DashboardTranslationKey = keyof typeof DASHBOARD_TRANSLATIONS.en;
+type DashboardTranslator = (key: DashboardTranslationKey) => string;
+
+function dashboardText(
+  language: DashboardLanguage,
+  key: DashboardTranslationKey,
+): string {
+  return DASHBOARD_TRANSLATIONS[language][key] ?? DASHBOARD_TRANSLATIONS.en[key];
+}
+
+const DEFAULT_DASHBOARD_LANGUAGE_CONTEXT = {
+  language: "zh" as DashboardLanguage,
+  t: ((key: DashboardTranslationKey) => dashboardText("zh", key)) as DashboardTranslator,
+};
+
+const DashboardLanguageContext = createContext(DEFAULT_DASHBOARD_LANGUAGE_CONTEXT);
+
+export function resolveInitialDashboardLanguage(
+  storage?: Pick<Storage, "getItem"> | null,
+): DashboardLanguage {
+  try {
+    const stored = storage?.getItem(DASHBOARD_LANGUAGE_STORAGE_KEY);
+    return stored === "en" || stored === "zh" ? stored : "zh";
+  } catch {
+    return "zh";
+  }
+}
+
+export function DashboardLanguageProvider({
+  language,
+  children,
+}: {
+  language: DashboardLanguage;
+  children: ReactNode;
+}) {
+  const value = useMemo(
+    () => ({
+      language,
+      t: ((key: DashboardTranslationKey) => dashboardText(language, key)) as DashboardTranslator,
+    }),
+    [language],
+  );
+
+  return (
+    <DashboardLanguageContext.Provider value={value}>
+      {children}
+    </DashboardLanguageContext.Provider>
+  );
+}
+
+function useDashboardLanguage() {
+  return useContext(DashboardLanguageContext);
+}
+
+export function LanguageToggle({
+  language,
+  onChange,
+}: {
+  language: DashboardLanguage;
+  onChange: (language: DashboardLanguage) => void;
+}) {
+  const t = (key: DashboardTranslationKey) => dashboardText(language, key);
+
+  return (
+    <div className="language-toggle" role="group" aria-label={t("language.toggleAria")}>
+      <button
+        className={`language-toggle__button${language === "zh" ? " language-toggle__button--active" : ""}`}
+        type="button"
+        aria-pressed={language === "zh"}
+        onClick={() => onChange("zh")}
+      >
+        {t("language.zh")}
+      </button>
+      <button
+        className={`language-toggle__button${language === "en" ? " language-toggle__button--active" : ""}`}
+        type="button"
+        aria-pressed={language === "en"}
+        onClick={() => onChange("en")}
+      >
+        {t("language.en")}
+      </button>
+    </div>
+  );
+}
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
@@ -277,16 +787,16 @@ function canCancelExecution(execution: Execution): boolean {
   return ["queued", "running"].includes(execution.status);
 }
 
-function socketStatusLabel(status: SocketStatus): string {
+function socketStatusLabel(status: SocketStatus, t: DashboardTranslator): string {
   switch (status) {
     case "open":
-      return "WebSocket live";
+      return t("socket.open");
     case "connecting":
-      return "WebSocket connecting";
+      return t("socket.connecting");
     case "reconnecting":
-      return "WebSocket reconnecting";
+      return t("socket.reconnecting");
     default:
-      return "WebSocket error";
+      return t("socket.error");
   }
 }
 
@@ -387,16 +897,22 @@ function schedulerStatusByAgentId(
   return byId;
 }
 
-function formatSchedulerQueue(status: SchedulerAgentStatus | undefined): string {
+function formatSchedulerQueue(
+  status: SchedulerAgentStatus | undefined,
+  t: DashboardTranslator,
+): string {
   if (!status) return "-";
   const pending = status.pendingCount ?? status.queuedCount ?? 0;
-  if (status.maxPendingQueue == null) return `${pending} pending`;
-  return `${pending} / ${status.maxPendingQueue} pending`;
+  if (status.maxPendingQueue == null) return `${pending} ${t("table.pendingSuffix")}`;
+  return `${pending} / ${status.maxPendingQueue} ${t("table.pendingSuffix")}`;
 }
 
-function formatSchedulerCapacity(status: SchedulerAgentStatus | undefined): string {
+function formatSchedulerCapacity(
+  status: SchedulerAgentStatus | undefined,
+  t: DashboardTranslator,
+): string {
   if (!status) return "-";
-  return `${status.capacityAvailable ?? 0} / ${status.concurrency ?? 0} free`;
+  return `${status.capacityAvailable ?? 0} / ${status.concurrency ?? 0} ${t("table.freeSuffix")}`;
 }
 
 function triggerChainAgentId(entry: TriggerChainEntry): string {
@@ -419,8 +935,11 @@ function triggerChainTime(entry: TriggerChainEntry): string | null {
   return entry.startedAt ?? entry.started_at ?? entry.scheduledAt ?? entry.scheduled_at ?? entry.createdAt ?? entry.created_at ?? null;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Failed to load data";
+function errorMessage(
+  err: unknown,
+  fallback = DASHBOARD_TRANSLATIONS.en["error.loadData"],
+): string {
+  return err instanceof Error ? err.message : fallback;
 }
 
 function initialAgentCreateForm(projectId = ""): AgentCreateFormValues {
@@ -654,7 +1173,8 @@ function SchedulerStateCell({
   state: string | null | undefined;
   meta?: string;
 }) {
-  const label = state || "not reported";
+  const { t } = useDashboardLanguage();
+  const label = state || t("table.notReported");
   return (
     <div className="scheduler-cell">
       <StatusPill tone={schedulerStateTone(state)}>{label}</StatusPill>
@@ -696,26 +1216,28 @@ export function ExecutionFilterPanel({
   onChange: (patch: Partial<ExecutionFilterValues>) => void;
   onReset: () => void;
 }) {
+  const { t } = useDashboardLanguage();
+
   return (
     <section className="panel execution-filter-panel">
       <header className="panel__header">
         <div>
-          <span className="eyebrow">Filters</span>
-          <h2>Execution Filters</h2>
-          <p>Filter the execution log by agent, status, and trigger source.</p>
+          <span className="eyebrow">{t("filters.eyebrow")}</span>
+          <h2>{t("filters.title")}</h2>
+          <p>{t("filters.description")}</p>
         </div>
         {loading ? <span className="panel__count">...</span> : null}
       </header>
 
       <div className="execution-filter-grid">
         <label className="control-field">
-          <span>Agent</span>
+          <span>{t("filters.agent")}</span>
           <select
             className="control-input control-select"
             value={values.agentId}
             onChange={(event) => onChange({ agentId: event.currentTarget.value })}
           >
-            <option value="">All agents</option>
+            <option value="">{t("filters.allAgents")}</option>
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agentDisplayName(agent)}
@@ -725,13 +1247,13 @@ export function ExecutionFilterPanel({
         </label>
 
         <label className="control-field">
-          <span>Status</span>
+          <span>{t("filters.status")}</span>
           <select
             className="control-input control-select"
             value={values.status}
             onChange={(event) => onChange({ status: event.currentTarget.value })}
           >
-            <option value="">All statuses</option>
+            <option value="">{t("filters.allStatuses")}</option>
             <option value="queued">queued</option>
             <option value="running">running</option>
             <option value="success">success</option>
@@ -742,13 +1264,13 @@ export function ExecutionFilterPanel({
         </label>
 
         <label className="control-field">
-          <span>Trigger</span>
+          <span>{t("filters.trigger")}</span>
           <select
             className="control-input control-select"
             value={values.triggerType}
             onChange={(event) => onChange({ triggerType: event.currentTarget.value })}
           >
-            <option value="">All triggers</option>
+            <option value="">{t("filters.allTriggers")}</option>
             <option value="cron">cron</option>
             <option value="manual">manual</option>
             <option value="api">api</option>
@@ -765,7 +1287,7 @@ export function ExecutionFilterPanel({
           onClick={onReset}
           disabled={loading || !hasExecutionFilters(values)}
         >
-          Reset Filters
+          {t("filters.reset")}
         </button>
       </footer>
     </section>
@@ -783,6 +1305,7 @@ function PageNavigation({
   pages: PageDefinition[];
   onNavigate: (p: Page) => void;
 }) {
+  const { t } = useDashboardLanguage();
   const primaryPages = pages.filter((p) =>
     ["overview", "agents", "executions"].includes(p.id),
   );
@@ -811,31 +1334,31 @@ function PageNavigation({
   );
 
   return (
-    <nav className="page-nav" aria-label="Page navigation">
+    <nav className="page-nav" aria-label={t("nav.aria")}>
       <div className="sidebar-brand">
         <span className="sidebar-brand__mark">
           <Icon name="cube" />
         </span>
-        <span>Local-first control plane</span>
+        <span>{t("nav.controlPlane")}</span>
       </div>
       <div className="page-nav__group">
-        <span className="page-nav__title">Workspace</span>
+        <span className="page-nav__title">{t("nav.workspace")}</span>
         {primaryPages.map(renderButton)}
       </div>
       {secondaryPages.length > 0 ? (
         <div className="page-nav__group">
-          <span className="page-nav__title">Detail</span>
+          <span className="page-nav__title">{t("nav.detail")}</span>
           {secondaryPages.map(renderButton)}
         </div>
       ) : null}
       <div className="sidebar-status-card">
-        <strong>Agent Cron Hub</strong>
-        <p>Monitor, schedule, and trigger cron-driven AI agents from a single dashboard.</p>
+        <strong>{t("product.sidebarName")}</strong>
+        <p>{t("product.sidebarSubtitle")}</p>
         <div>
           <span>v1.0.0</span>
           <span className="sidebar-status-card__live">
             <span />
-            Live local
+            {t("status.liveLocal")}
           </span>
         </div>
       </div>
@@ -864,13 +1387,14 @@ function ExecutionTable({
     const a = agents.find((x) => x.id === agentId);
     return a ? agentDisplayName(a) : agentId.slice(0, 8);
   };
+  const { t } = useDashboardLanguage();
   const showActions = Boolean(onCancel || onRerun);
 
   if (!Array.isArray(executions) || executions.length === 0) {
     return (
       <div className="empty-state">
-        <h3>No executions yet</h3>
-        <p>Trigger an agent or wait for a cron schedule to produce executions.</p>
+        <h3>{t("executions.emptyTitle")}</h3>
+        <p>{t("executions.emptyDescription")}</p>
       </div>
     );
   }
@@ -880,12 +1404,12 @@ function ExecutionTable({
       <table className="runs-table">
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Agent</th>
-            <th>Trigger</th>
-            <th>Status</th>
-            <th>Duration</th>
-            {showActions ? <th>Actions</th> : null}
+            <th>{t("table.time")}</th>
+            <th>{t("table.agent")}</th>
+            <th>{t("table.trigger")}</th>
+            <th>{t("table.status")}</th>
+            <th>{t("table.duration")}</th>
+            {showActions ? <th>{t("table.actions")}</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -922,7 +1446,7 @@ function ExecutionTable({
                             onRerun(e);
                           }}
                         >
-                          Rerun
+                          {t("actions.rerun")}
                         </button>
                       ) : null}
                       {onCancel && canCancelExecution(e) ? (
@@ -934,7 +1458,7 @@ function ExecutionTable({
                             onCancel(e);
                           }}
                         >
-                          Cancel
+                          {t("actions.cancel")}
                         </button>
                       ) : null}
                     </div>
@@ -960,24 +1484,28 @@ export function ExecutionHistoryPager({
   loading: boolean;
   onLoadMore: () => void;
 }) {
+  const { t } = useDashboardLanguage();
   if (visibleCount <= 0) return null;
 
   return (
     <footer className="execution-history-pager">
-      <span>Showing {visibleCount} executions</span>
+      <span>
+        {t("executions.showingPrefix")} {visibleCount} {t("executions.showingSuffix")}
+      </span>
       <button
         className="ghost-button ghost-button--compact"
         type="button"
         disabled={loading || !canLoadMore}
         onClick={onLoadMore}
       >
-        {loading ? "Loading..." : canLoadMore ? "Load More" : "All loaded"}
+        {loading ? t("status.loading") : canLoadMore ? t("executions.loadMore") : t("executions.allLoaded")}
       </button>
     </footer>
   );
 }
 
 export function ExecutionSummaryPanel({ execution }: { execution: Execution }) {
+  const { t } = useDashboardLanguage();
   const progressPercent =
     typeof execution.progressPercent === "number"
       ? Math.max(0, Math.min(100, execution.progressPercent))
@@ -987,46 +1515,46 @@ export function ExecutionSummaryPanel({ execution }: { execution: Execution }) {
     <div className="panel panel--execution-summary">
       <dl className="meta-grid">
         <div>
-          <dt>Status</dt>
+          <dt>{t("executionSummary.status")}</dt>
           <dd className="status-value">
             <StatusDot status={execution.status} />
             {execution.status}
           </dd>
         </div>
         <div>
-          <dt>Duration</dt>
+          <dt>{t("executionSummary.duration")}</dt>
           <dd>
             {execution.durationMs
               ? `${execution.durationMs}ms`
-              : "N/A"}
+              : t("executionSummary.na")}
           </dd>
         </div>
         <div>
-          <dt>Trigger</dt>
+          <dt>{t("executionSummary.trigger")}</dt>
           <dd>
             {execution.triggerType} &mdash;{" "}
             {execution.triggeredBy ?? "-"}
           </dd>
         </div>
         <div>
-          <dt>Scheduled</dt>
+          <dt>{t("executionSummary.scheduled")}</dt>
           <dd>{formatTime(execution.scheduledAt ?? null)}</dd>
         </div>
         <div>
-          <dt>Started</dt>
+          <dt>{t("executionSummary.started")}</dt>
           <dd>{formatTime(execution.startedAt)}</dd>
         </div>
         <div>
-          <dt>Created</dt>
+          <dt>{t("executionSummary.created")}</dt>
           <dd>{formatTime(execution.createdAt ?? null)}</dd>
         </div>
         <div>
-          <dt>Traces recorded</dt>
+          <dt>{t("executionSummary.tracesRecorded")}</dt>
           <dd>{execution.traceCountActual ?? 0}</dd>
         </div>
         {progressPercent !== null ? (
           <div className="meta-grid__wide">
-            <dt>Progress</dt>
+            <dt>{t("executionSummary.progress")}</dt>
             <dd className="execution-progress">
               <div className="progress-stack">
                 <div className="progress-bar" aria-hidden="true">
@@ -1044,7 +1572,7 @@ export function ExecutionSummaryPanel({ execution }: { execution: Execution }) {
           </div>
         ) : null}
         <div>
-          <dt>Agent ID</dt>
+          <dt>{t("executionSummary.agentId")}</dt>
           <dd className="truncate-path">{execution.agentId}</dd>
         </div>
       </dl>
@@ -1080,14 +1608,15 @@ export function AlertPanel({
   actionBusyAlertId?: number | null;
 }) {
   const displayAlerts = visibleAlerts(alerts);
+  const { t } = useDashboardLanguage();
 
   return (
     <section className="panel alerts-panel">
       <header className="panel__header">
         <div>
-          <span className="eyebrow">Alerts</span>
-          <h2>Operational Alerts</h2>
-          <p>Recent scheduler health signals from failed runs, queue pressure, and timeouts.</p>
+          <span className="eyebrow">{t("alerts.eyebrow")}</span>
+          <h2>{t("alerts.title")}</h2>
+          <p>{t("alerts.description")}</p>
         </div>
         <span className="panel__count">{displayAlerts.length}</span>
       </header>
@@ -1096,8 +1625,8 @@ export function AlertPanel({
         <div className="alerts-empty">
           <Icon name="pulse" />
           <div>
-            <strong>No active alerts</strong>
-            <p>The scheduler has not recorded recent failure patterns.</p>
+            <strong>{t("alerts.emptyTitle")}</strong>
+            <p>{t("alerts.emptyDescription")}</p>
           </div>
         </div>
       ) : (
@@ -1129,7 +1658,7 @@ export function AlertPanel({
                         disabled={actionBusyAlertId === alert.id}
                         onClick={() => onAcknowledge(alert)}
                       >
-                        {actionBusyAlertId === alert.id ? "Acknowledging..." : "Acknowledge"}
+                        {actionBusyAlertId === alert.id ? t("actions.acknowledging") : t("actions.acknowledge")}
                       </button>
                     </div>
                   ) : null}
@@ -1184,6 +1713,7 @@ export function AgentDirectoryPanel({
 }) {
   const schedulerById = schedulerStatusByAgentId(schedulerStatus);
   const showSchedulerDiagnostics = Boolean(schedulerStatus);
+  const { t } = useDashboardLanguage();
 
   return (
     <>
@@ -1209,20 +1739,20 @@ export function AgentDirectoryPanel({
             <table className="runs-table">
               <thead>
                 <tr>
-                  <th>Project</th>
-                  <th>Agent</th>
-                  <th>Cron</th>
-                  <th>Status</th>
+                  <th>{t("table.project")}</th>
+                  <th>{t("table.agent")}</th>
+                  <th>{t("table.cron")}</th>
+                  <th>{t("table.status")}</th>
                   {showSchedulerDiagnostics ? (
                     <>
-                      <th>Dispatch</th>
-                      <th>Schedule</th>
-                      <th>Queue</th>
-                      <th>Capacity</th>
+                      <th>{t("table.dispatch")}</th>
+                      <th>{t("table.schedule")}</th>
+                      <th>{t("table.queue")}</th>
+                      <th>{t("table.capacity")}</th>
                     </>
                   ) : null}
-                  <th>Last 10</th>
-                  {showLifecycleActions ? <th>Actions</th> : null}
+                  <th>{t("table.last10")}</th>
+                  {showLifecycleActions ? <th>{t("table.actions")}</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -1247,7 +1777,7 @@ export function AgentDirectoryPanel({
                       </div>
                     </td>
                     <td>
-                      <code>{agent.cronExpression || "manual"}</code>
+                      <code>{agent.cronExpression || t("table.manual")}</code>
                     </td>
                     <td>
                       <StatusPill tone={agentStatusTone(agent)}>
@@ -1259,7 +1789,7 @@ export function AgentDirectoryPanel({
                         <td>
                           <SchedulerStateCell
                             state={schedulerAgentStatus?.dispatchState}
-                            meta={`${schedulerAgentStatus?.runningCount ?? 0} running`}
+                            meta={`${schedulerAgentStatus?.runningCount ?? 0} ${t("table.runningSuffix")}`}
                           />
                         </td>
                         <td>
@@ -1267,13 +1797,13 @@ export function AgentDirectoryPanel({
                             state={schedulerAgentStatus?.scheduleState}
                             meta={
                               schedulerAgentStatus?.nextRunAt
-                                ? `next ${formatTime(schedulerAgentStatus.nextRunAt)}`
+                                ? `${t("table.nextPrefix")} ${formatTime(schedulerAgentStatus.nextRunAt)}`
                                 : undefined
                             }
                           />
                         </td>
-                        <td>{formatSchedulerQueue(schedulerAgentStatus)}</td>
-                        <td>{formatSchedulerCapacity(schedulerAgentStatus)}</td>
+                        <td>{formatSchedulerQueue(schedulerAgentStatus, t)}</td>
+                        <td>{formatSchedulerCapacity(schedulerAgentStatus, t)}</td>
                       </>
                     ) : null}
                     <td>
@@ -1298,7 +1828,7 @@ export function AgentDirectoryPanel({
                               onToggleAgent(agent.id, !agent.enabled);
                             }}
                           >
-                            {agent.enabled ? "Disable" : "Enable"}
+                            {agent.enabled ? t("actions.disable") : t("actions.enable")}
                           </button>
                           <button
                             className="action-button action-button--resume"
@@ -1308,7 +1838,7 @@ export function AgentDirectoryPanel({
                               onTriggerAgent(agent.name);
                             }}
                           >
-                            Run
+                            {t("actions.run")}
                           </button>
                           {onDrainAgent ? (
                             <button
@@ -1320,7 +1850,7 @@ export function AgentDirectoryPanel({
                                 onDrainAgent(agent);
                               }}
                             >
-                              {draining ? "Draining..." : "Drain"}
+                              {draining ? t("actions.draining") : t("actions.drain")}
                             </button>
                           ) : null}
                           <button
@@ -1332,7 +1862,7 @@ export function AgentDirectoryPanel({
                               onDeleteAgent(agent);
                             }}
                           >
-                            {deleting ? "Deleting..." : "Delete"}
+                            {deleting ? t("actions.deleting") : t("actions.delete")}
                           </button>
                         </div>
                       </td>
@@ -1366,6 +1896,8 @@ export function AgentCreatePanel({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useDashboardLanguage();
+
   return (
     <form
       className="panel agent-create-panel"
@@ -1376,14 +1908,14 @@ export function AgentCreatePanel({
     >
       <header className="panel__header">
         <div>
-          <h2>New Agent</h2>
-          <p>Register a schedulable agent in the hub. The worker process can attach later through the SDK.</p>
+          <h2>{t("agentCreate.title")}</h2>
+          <p>{t("agentCreate.description")}</p>
         </div>
       </header>
 
       <div className="agent-create-grid">
         <label className="control-field">
-          <span>Project</span>
+          <span>{t("agentCreate.project")}</span>
           <select
             className="control-input control-select"
             value={values.projectId}
@@ -1398,7 +1930,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field">
-          <span>Type</span>
+          <span>{t("agentCreate.type")}</span>
           <select
             className="control-input control-select"
             value={values.agentType}
@@ -1410,7 +1942,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Agent name</span>
+          <span>{t("agentCreate.name")}</span>
           <input
             className="control-input"
             value={values.name}
@@ -1421,7 +1953,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Display name</span>
+          <span>{t("agentCreate.displayName")}</span>
           <input
             className="control-input"
             value={values.displayName}
@@ -1432,7 +1964,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Description</span>
+          <span>{t("agentCreate.descriptionLabel")}</span>
           <textarea
             className="control-input"
             value={values.description}
@@ -1444,7 +1976,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Cron</span>
+          <span>{t("table.cron")}</span>
           <input
             className="control-input"
             value={values.cronExpression}
@@ -1454,7 +1986,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Handler</span>
+          <span>{t("agentCreate.handler")}</span>
           <input
             className="control-input"
             value={values.handlerName}
@@ -1464,7 +1996,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field">
-          <span>Concurrency</span>
+          <span>{t("agentCreate.concurrency")}</span>
           <input
             className="control-input"
             type="number"
@@ -1475,7 +2007,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field">
-          <span>Timeout</span>
+          <span>{t("agentCreate.timeout")}</span>
           <input
             className="control-input"
             type="number"
@@ -1486,7 +2018,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field">
-          <span>Retries</span>
+          <span>{t("agentCreate.retries")}</span>
           <input
             className="control-input"
             type="number"
@@ -1497,7 +2029,7 @@ export function AgentCreatePanel({
         </label>
 
         <label className="control-field">
-          <span>Queue cap</span>
+          <span>{t("agentCreate.queueCap")}</span>
           <input
             className="control-input"
             type="number"
@@ -1521,7 +2053,7 @@ export function AgentCreatePanel({
           onClick={onCancel}
           disabled={busy}
         >
-          Cancel
+          {t("actions.cancel")}
         </button>
         <button
           className="action-button action-button--resume"
@@ -1529,7 +2061,7 @@ export function AgentCreatePanel({
           disabled={busy || projects.length === 0}
         >
           <Icon name="plus" />
-          {busy ? "Creating..." : "Create agent"}
+          {busy ? t("actions.creating") : t("actions.createAgent")}
         </button>
       </footer>
     </form>
@@ -1549,6 +2081,8 @@ export function AgentTriggerPanel({
   onPayloadChange: (value: string) => void;
   onSubmit: () => void;
 }) {
+  const { t } = useDashboardLanguage();
+
   return (
     <form
       className="agent-runtime-section agent-trigger-panel"
@@ -1562,13 +2096,13 @@ export function AgentTriggerPanel({
           <Icon name="play" />
         </span>
         <div>
-          <h3>Manual Trigger</h3>
-          <p>Run this agent with a dashboard-provided payload.</p>
+          <h3>{t("agentTrigger.title")}</h3>
+          <p>{t("agentTrigger.description")}</p>
         </div>
       </header>
 
       <label className="control-field agent-trigger-panel__field">
-        <span>Payload JSON</span>
+        <span>{t("agentTrigger.payload")}</span>
         <textarea
           className="control-input trigger-payload-input"
           value={payloadText}
@@ -1587,7 +2121,7 @@ export function AgentTriggerPanel({
       <footer className="agent-trigger-footer">
         <button className="action-button action-button--resume" type="submit" disabled={busy}>
           <Icon name="play" />
-          {busy ? "Triggering..." : "Trigger Now"}
+          {busy ? t("actions.triggering") : t("actions.triggerNow")}
         </button>
       </footer>
     </form>
@@ -1607,6 +2141,8 @@ export function AgentSettingsPanel({
   onChange: (patch: Partial<AgentSettingsFormValues>) => void;
   onSubmit: () => void;
 }) {
+  const { t } = useDashboardLanguage();
+
   return (
     <form
       className="agent-runtime-section agent-settings-panel"
@@ -1620,14 +2156,14 @@ export function AgentSettingsPanel({
           <Icon name="execution" />
         </span>
         <div>
-          <h3>Agent Settings</h3>
-          <p>Scheduling, queue, retry, and idempotency controls.</p>
+          <h3>{t("agentSettings.title")}</h3>
+          <p>{t("agentSettings.description")}</p>
         </div>
       </header>
 
       <div className="agent-settings-grid">
         <label className="control-field control-field--wide">
-          <span>Display name</span>
+          <span>{t("agentSettings.displayName")}</span>
           <input
             className="control-input"
             value={values.displayName}
@@ -1636,7 +2172,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Cron</span>
+          <span>{t("table.cron")}</span>
           <input
             className="control-input"
             value={values.cronExpression}
@@ -1646,7 +2182,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field control-field--wide">
-          <span>Handler</span>
+          <span>{t("agentCreate.handler")}</span>
           <input
             className="control-input"
             value={values.handlerName}
@@ -1656,7 +2192,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Misfire</span>
+          <span>{t("agentSettings.misfire")}</span>
           <select
             className="control-input control-select"
             value={values.misfirePolicy}
@@ -1669,7 +2205,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Concurrency</span>
+          <span>{t("agentCreate.concurrency")}</span>
           <input
             className="control-input"
             type="number"
@@ -1680,7 +2216,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Queue cap</span>
+          <span>{t("agentCreate.queueCap")}</span>
           <input
             className="control-input"
             type="number"
@@ -1691,7 +2227,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Timeout</span>
+          <span>{t("agentCreate.timeout")}</span>
           <input
             className="control-input"
             type="number"
@@ -1702,7 +2238,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Retries</span>
+          <span>{t("agentCreate.retries")}</span>
           <input
             className="control-input"
             type="number"
@@ -1713,7 +2249,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Backoff</span>
+          <span>{t("agentSettings.backoff")}</span>
           <input
             className="control-input"
             type="number"
@@ -1724,7 +2260,7 @@ export function AgentSettingsPanel({
         </label>
 
         <label className="control-field">
-          <span>Idempotency</span>
+          <span>{t("agentSettings.idempotency")}</span>
           <input
             className="control-input"
             type="number"
@@ -1743,7 +2279,7 @@ export function AgentSettingsPanel({
 
       <footer className="agent-settings-footer">
         <button className="action-button action-button--resume" type="submit" disabled={busy}>
-          {busy ? "Saving..." : "Save Settings"}
+          {busy ? t("actions.saving") : t("actions.saveSettings")}
         </button>
       </footer>
     </form>
@@ -1752,6 +2288,7 @@ export function AgentSettingsPanel({
 
 export function ExecutionPayloadPanel({ payload }: { payload: unknown }) {
   const formattedPayload = JSON.stringify(payload ?? {}, null, 2);
+  const { t } = useDashboardLanguage();
 
   return (
     <div className="panel execution-payload-panel">
@@ -1761,8 +2298,8 @@ export function ExecutionPayloadPanel({ payload }: { payload: unknown }) {
             <Icon name="tray" />
           </span>
           <div>
-            <h2>Input Payload</h2>
-            <p>Payload captured when this execution was queued.</p>
+            <h2>{t("payload.title")}</h2>
+            <p>{t("payload.description")}</p>
           </div>
         </div>
       </header>
@@ -1832,6 +2369,15 @@ export default function App() {
 
   /* websocket */
   const [socketStatus, setSocketStatus] = useState<SocketStatus>("connecting");
+  const [language, setLanguage] = useState<DashboardLanguage>(() => (
+    resolveInitialDashboardLanguage(
+      typeof window === "undefined" ? null : window.localStorage,
+    )
+  ));
+  const t = useCallback(
+    (key: DashboardTranslationKey) => dashboardText(language, key),
+    [language],
+  );
 
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
@@ -1866,6 +2412,14 @@ export default function App() {
       window.history.pushState(null, "", nextUrl);
     }
   }, [page]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DASHBOARD_LANGUAGE_STORAGE_KEY, language);
+    } catch {
+      // Best-effort preference persistence; the dashboard still works without storage.
+    }
+  }, [language]);
 
   /* data loading */
   const loadData = useCallback(async (silent = false) => {
@@ -2145,10 +2699,12 @@ export default function App() {
   };
 
   const handleDrainAgent = async (agent: Agent) => {
-    const confirmed = window.confirm(`Drain agent "${agentDisplayName(agent)}"? Queued executions will be cancelled and scheduling will be disabled.`);
+    const confirmed = window.confirm(
+      `${t("confirm.drain")} "${agentDisplayName(agent)}"${t("confirm.drainDescription")}`,
+    );
     if (!confirmed) return;
     const cancelRunning = agent.activeExecutionCount > 0
-      ? window.confirm(`Also cancel running executions for "${agentDisplayName(agent)}"?`)
+      ? window.confirm(`${t("confirm.cancelRunning")} "${agentDisplayName(agent)}"?`)
       : false;
 
     setDrainBusyAgentId(agent.id);
@@ -2171,7 +2727,9 @@ export default function App() {
   };
 
   const handleDeleteAgent = async (agent: Agent) => {
-    const confirmed = window.confirm(`Delete agent "${agentDisplayName(agent)}"? This cannot be undone.`);
+    const confirmed = window.confirm(
+      `${t("confirm.delete")} "${agentDisplayName(agent)}"${t("confirm.deleteDescription")}`,
+    );
     if (!confirmed) return;
 
     setDeleteBusyAgentId(agent.id);
@@ -2242,7 +2800,7 @@ export default function App() {
     try {
       const updated = await patchAgent(agent.id, patch);
       if (!updated?.id) {
-        throw new Error(updated?.error ?? "Failed to update agent settings");
+        throw new Error(updated?.error ?? t("error.updateAgentSettings"));
       }
       const updatedAgent = updated as Agent;
       setSelectedAgent(updatedAgent);
@@ -2279,11 +2837,11 @@ export default function App() {
     const description = createAgentForm.description.trim();
 
     if (!selectedProjectId) {
-      setCreateAgentError("No active project is available.");
+      setCreateAgentError(t("error.noActiveProject"));
       return;
     }
     if (!name || !displayName || !description) {
-      setCreateAgentError("Agent name, display name, and description are required.");
+      setCreateAgentError(t("error.agentRequired"));
       return;
     }
 
@@ -2418,7 +2976,7 @@ export default function App() {
       page === "detail" || page === "agent-detail"
         ? {
             id: page,
-            label: page === "detail" ? "Execution Detail" : "Agent Detail",
+            label: page === "detail" ? t("nav.executionDetail") : t("nav.agentDetail"),
             description: "",
           }
         : null;
@@ -2426,20 +2984,20 @@ export default function App() {
     return [
       {
         id: "overview",
-        label: "Overview",
-        description: "High-level snapshot of agent health and recent activity.",
+        label: t("nav.overview"),
+        description: t("nav.overviewDescription"),
         badge: String(agents.length),
       },
       {
         id: "agents",
-        label: "Agents",
-        description: "Browse agents, cron schedules, and trigger runs.",
+        label: t("nav.agents"),
+        description: t("nav.agentsDescription"),
         badge: String(agents.length),
       },
       {
         id: "executions",
-        label: "Executions",
-        description: "Full execution history across all agents.",
+        label: t("nav.executions"),
+        description: t("nav.executionsDescription"),
         badge: String(executions.length),
       },
       ...(backPage ? [backPage] : []),
@@ -2490,6 +3048,7 @@ export default function App() {
 
   /* render */
   return (
+    <DashboardLanguageProvider language={language}>
     <div className="dashboard-shell">
       {/* ── Workspace ────────────────────────────────────── */}
       <div className="workspace-frame">
@@ -2514,19 +3073,20 @@ export default function App() {
           <header className="app-header app-header--compact">
             <div className="app-header__copy">
               <div className="app-header__title-row">
-                <h1>Agent Cron Hub</h1>
+                <h1>{t("product.name")}</h1>
                 <StatusPill tone={loading ? "neutral" : "success"}>
-                  {loading ? "Loading..." : "Live local"}
+                  {loading ? t("status.loading") : t("status.liveLocal")}
                 </StatusPill>
               </div>
               <p className="subtitle">
-                Monitor, schedule, and trigger cron-driven AI agents from a single dashboard.
+                {t("product.subtitle")}
               </p>
             </div>
 
             <div className="app-header__meta">
+              <LanguageToggle language={language} onChange={setLanguage} />
               <StatusPill tone={getSocketTone(socketStatus)}>
-                {socketStatusLabel(socketStatus)}
+                {socketStatusLabel(socketStatus, t)}
               </StatusPill>
               <button
                 className="ghost-button"
@@ -2534,7 +3094,7 @@ export default function App() {
                 disabled={loading}
               >
                 <Icon name="refresh" />
-                Refresh snapshot
+                {t("actions.refresh")}
               </button>
             </div>
           </header>
@@ -2543,14 +3103,14 @@ export default function App() {
           {error ? (
             <div className="banner banner--error" role="alert">
               <div>
-                <strong>Dashboard sync issue</strong>
+                <strong>{t("error.dashboardSync")}</strong>
                 <p>{error}</p>
               </div>
               <button
                 className="ghost-button ghost-button--light"
                 onClick={() => loadData()}
               >
-                Retry now
+                {t("actions.retryNow")}
               </button>
             </div>
           ) : null}
@@ -2559,7 +3119,7 @@ export default function App() {
           {loading ? (
             <div className="loading-state">
               <div className="loading-spinner" />
-              <p>Loading dashboard…</p>
+              <p>{t("loading.dashboard")}</p>
             </div>
           ) : null}
 
@@ -2569,27 +3129,27 @@ export default function App() {
               {/* Stat cards */}
               <div className="summary-grid">
                 <StatCard
-                  label="Agents"
+                  label={t("stats.agents")}
                   value={stats.agentsTotal ?? agents.length}
-                  meta={`${agentsOnline} online`}
+                  meta={`${agentsOnline} ${t("stats.onlineMeta")}`}
                   tone="info"
                 />
                 <StatCard
-                  label="Online"
+                  label={t("stats.online")}
                   value={agentsOnline}
-                  meta={`of ${agents.length} total`}
+                  meta={`${t("stats.totalPrefix")} ${agents.length} ${t("stats.totalSuffix")}`}
                   tone="success"
                 />
                 <StatCard
-                  label="Running"
+                  label={t("stats.running")}
                   value={runningCount}
-                  meta="active executions"
+                  meta={t("stats.activeExecutions")}
                   tone={runningCount > 0 ? "info" : "neutral"}
                 />
                 <StatCard
-                  label="Failed (24h)"
+                  label={t("stats.failed24h")}
                   value={recentFailures}
-                  meta="recent failures"
+                  meta={t("stats.recentFailures")}
                   tone={recentFailures > 0 ? "danger" : "success"}
                 />
               </div>
@@ -2604,11 +3164,11 @@ export default function App() {
                 agents={agents}
                 projects={projects}
                 schedulerStatus={schedulerStatus}
-                eyebrow="Agents"
-                title="Agent Status"
-                description="All registered agents, executor status, schedules, and quick actions."
-                emptyTitle="No agents registered"
-                emptyDescription="Agents will appear here once they connect or are configured."
+                eyebrow={t("agentDirectory.overviewEyebrow")}
+                title={t("agentDirectory.statusTitle")}
+                description={t("agentDirectory.statusDescription")}
+                emptyTitle={t("agentDirectory.emptyTitle")}
+                emptyDescription={t("agentDirectory.emptyDescription")}
                 deleteBusyAgentId={deleteBusyAgentId}
                 drainBusyAgentId={drainBusyAgentId}
                 onOpenAgent={openAgentDetail}
@@ -2627,11 +3187,11 @@ export default function App() {
                 agents={agents}
                 projects={projects}
                 schedulerStatus={schedulerStatus}
-                eyebrow="Directory"
-                title="Agents"
-                description="Each agent has a cron expression, online/offline status, and recent execution dots."
-                emptyTitle="No agents registered"
-                emptyDescription="Agents will appear here once they connect or are configured."
+                eyebrow={t("agentDirectory.directoryEyebrow")}
+                title={t("agentDirectory.agentsTitle")}
+                description={t("agentDirectory.agentsDescription")}
+                emptyTitle={t("agentDirectory.emptyTitle")}
+                emptyDescription={t("agentDirectory.emptyDescription")}
                 actions={
                   <button
                     className="action-button action-button--resume"
@@ -2642,7 +3202,7 @@ export default function App() {
                     }}
                   >
                     <Icon name="plus" />
-                    New Agent
+                    {t("actions.newAgent")}
                   </button>
                 }
                 onOpenAgent={openAgentDetail}
@@ -2672,11 +3232,11 @@ export default function App() {
               <AgentDirectoryPanel
                 agents={archivedAgents}
                 projects={projects}
-                eyebrow="Archive"
-                title="Archived Agents"
-                description="Archived agents are hidden from scheduling but keep execution history."
-                emptyTitle="No archived agents"
-                emptyDescription="Deleted agents will appear here after they have no active executions."
+                eyebrow={t("agentDirectory.archiveEyebrow")}
+                title={t("agentDirectory.archiveTitle")}
+                description={t("agentDirectory.archiveDescription")}
+                emptyTitle={t("agentDirectory.archiveEmptyTitle")}
+                emptyDescription={t("agentDirectory.archiveEmptyDescription")}
                 showLifecycleActions={false}
                 onOpenAgent={openAgentDetail}
                 onToggleAgent={handleToggleAgent}
@@ -2691,10 +3251,10 @@ export default function App() {
             <>
               <div className="page-context-bar">
                 <div>
-                  <span className="page-context-bar__eyebrow">History</span>
-                  <h2>Executions</h2>
+                  <span className="page-context-bar__eyebrow">{t("executionsPage.eyebrow")}</span>
+                  <h2>{t("executionsPage.title")}</h2>
                   <p>
-                    Full execution log. Click any row to open the trace viewer.
+                    {t("executionsPage.description")}
                   </p>
                 </div>
               </div>
@@ -2710,14 +3270,14 @@ export default function App() {
               {executionFilterError ? (
                 <div className="banner banner--error" role="alert">
                   <div>
-                    <strong>Execution filter issue</strong>
+                    <strong>{t("error.executionFilter")}</strong>
                     <p>{executionFilterError}</p>
                   </div>
                   <button
                     className="ghost-button ghost-button--light"
                     onClick={() => loadFilteredExecutions(executionFilters)}
                   >
-                    Retry now
+                    {t("actions.retryNow")}
                   </button>
                 </div>
               ) : null}
@@ -2752,11 +3312,11 @@ export default function App() {
                     onClick={() => setPage("executions")}
                   >
                     <Icon name="arrow-left" />
-                    Back to Executions
+                    {t("detail.backToExecutions")}
                   </button>
-                  <h2>Execution Detail</h2>
+                  <h2>{t("detail.executionTitle")}</h2>
                   <p>
-                    Status, timing, and trace spans for this execution.
+                    {t("detail.executionDescription")}
                   </p>
                 </div>
                 <div className="detail-action-bar">
@@ -2770,7 +3330,7 @@ export default function App() {
                       onClick={() => handleRerunExecution(selectedExecution)}
                     >
                       <Icon name="play" />
-                      Rerun
+                      {t("actions.rerun")}
                     </button>
                     {canCancelExecution(selectedExecution) ? (
                       <button
@@ -2779,7 +3339,7 @@ export default function App() {
                         onClick={() => handleCancelExecution(selectedExecution)}
                       >
                         <Icon name="cancel" />
-                        Cancel
+                        {t("actions.cancel")}
                       </button>
                     ) : null}
                   </div>
@@ -2795,7 +3355,7 @@ export default function App() {
                     style={{ marginTop: 16 }}
                   >
                     <div>
-                      <strong>Error</strong>
+                      <strong>{t("detail.error")}</strong>
                       <p>{selectedExecution.errorMessage}</p>
                     </div>
                   </div>
@@ -2807,7 +3367,7 @@ export default function App() {
                     style={{ marginTop: 16 }}
                   >
                     <div>
-                      <strong>Result</strong>
+                      <strong>{t("detail.result")}</strong>
                       <p>{selectedExecution.resultSummary}</p>
                     </div>
                   </div>
@@ -2823,15 +3383,15 @@ export default function App() {
                       <Icon name="execution" />
                     </span>
                     <div>
-                      <h2>Trigger Chain</h2>
-                      <p>Upstream and downstream executions linked to this run.</p>
+                      <h2>{t("triggerChain.title")}</h2>
+                      <p>{t("triggerChain.description")}</p>
                     </div>
                   </div>
                 </header>
 
                 {triggerChain.length === 0 ? (
                   <div className="trigger-chain-empty">
-                    No linked executions recorded.
+                    {t("triggerChain.empty")}
                   </div>
                 ) : (
                   <ol className="trigger-chain-list">
@@ -2865,10 +3425,10 @@ export default function App() {
                                 void fetchExecutionDetail(entry.id).then(openDetail);
                               }}
                             >
-                              Open
+                              {t("actions.open")}
                             </button>
                           ) : (
-                            <span className="trigger-chain-item__current-label">Current</span>
+                            <span className="trigger-chain-item__current-label">{t("actions.current")}</span>
                           )}
                         </li>
                       );
@@ -2885,15 +3445,15 @@ export default function App() {
                       <Icon name="pulse" />
                     </span>
                     <div>
-                      <h2>Traces</h2>
-                      <p>Span-level details captured during this execution.</p>
+                      <h2>{t("traces.title")}</h2>
+                      <p>{t("traces.description")}</p>
                     </div>
                   </div>
                   <button
                     className="ghost-button ghost-button--compact"
                     onClick={handleViewRawTraces}
                   >
-                    View raw
+                    {t("actions.viewRaw")}
                     <Icon name="external" />
                   </button>
                 </header>
@@ -2903,44 +3463,44 @@ export default function App() {
                     <span className="empty-state__icon">
                       <Icon name="tray" />
                     </span>
-                    <h3>No traces recorded</h3>
+                    <h3>{t("traces.emptyTitle")}</h3>
                     <p>
-                      This execution did not produce any trace spans.
+                      {t("traces.emptyDescription")}
                     </p>
                   </div>
                 ) : (
                   <ul className="timeline-list">
-                    {traces.map((t, i) => {
-                      const turnIndex = t.turnIndex ?? t.turn_index ?? 0;
-                      const spanIndex = t.spanIndex ?? t.span_index ?? 0;
-                      const spanType = t.spanType ?? t.span_type ?? "span";
-                      const latencyMs = t.latencyMs ?? t.latency_ms;
-                      const inputContent = t.inputContent ?? t.input_content;
-                      const outputContent = t.outputContent ?? t.output_content;
-                      const inputTokens = t.inputTokens ?? t.input_tokens;
-                      const outputTokens = t.outputTokens ?? t.output_tokens;
+                    {traces.map((trace, i) => {
+                      const turnIndex = trace.turnIndex ?? trace.turn_index ?? 0;
+                      const spanIndex = trace.spanIndex ?? trace.span_index ?? 0;
+                      const spanType = trace.spanType ?? trace.span_type ?? "span";
+                      const latencyMs = trace.latencyMs ?? trace.latency_ms;
+                      const inputContent = trace.inputContent ?? trace.input_content;
+                      const outputContent = trace.outputContent ?? trace.output_content;
+                      const inputTokens = trace.inputTokens ?? trace.input_tokens;
+                      const outputTokens = trace.outputTokens ?? trace.output_tokens;
 
                       return (
                       <li key={i} className="timeline-item">
                         <div
                           className={`event-dot event-dot--${getStatusTone(
-                            t.status ?? "neutral",
+                            trace.status ?? "neutral",
                           )}`}
                         />
                         <div className="timeline-item__body">
                           <p>
                             <strong>
-                              Turn {turnIndex}.{spanIndex}
+                              {t("traces.turn")} {turnIndex}.{spanIndex}
                             </strong>{" "}
-                            &mdash; {spanType} ({t.role ?? "unknown"})
-                            {t.model ? ` &mdash; ${t.model}` : ""}
+                            &mdash; {spanType} ({trace.role ?? t("traces.unknown")})
+                            {trace.model ? ` &mdash; ${trace.model}` : ""}
                             {latencyMs
                               ? ` &mdash; ${latencyMs}ms`
                               : ""}
                           </p>
                           {inputContent ? (
                             <details>
-                              <summary>Input</summary>
+                              <summary>{t("traces.input")}</summary>
                               <pre
                                 style={{
                                   whiteSpace: "pre-wrap",
@@ -2959,7 +3519,7 @@ export default function App() {
                           ) : null}
                           {outputContent ? (
                             <details>
-                              <summary>Output</summary>
+                              <summary>{t("traces.output")}</summary>
                               <pre
                                 style={{
                                   whiteSpace: "pre-wrap",
@@ -2978,10 +3538,10 @@ export default function App() {
                           ) : null}
                           <div className="timeline-item__meta">
                             {inputTokens != null
-                              ? `${inputTokens} in`
+                              ? `${inputTokens} ${t("traces.inTokens")}`
                               : ""}
                             {outputTokens != null
-                              ? ` / ${outputTokens} out`
+                              ? ` / ${outputTokens} ${t("traces.outTokens")}`
                               : ""}
                           </div>
                         </div>
@@ -3004,10 +3564,11 @@ export default function App() {
                     style={{ marginBottom: 8 }}
                     onClick={() => setPage("agents")}
                   >
-                    &larr; Back to Agents
+                    <Icon name="arrow-left" />
+                    {t("agentDetail.backToAgents")}
                   </button>
                   <h2>{agentDisplayName(selectedAgent)}</h2>
-                  <p>Agent configuration, status, and recent executions.</p>
+                  <p>{t("agentDetail.description")}</p>
                 </div>
                 <StatusPill
                   tone={agentStatusTone(selectedAgent)}
@@ -3019,36 +3580,36 @@ export default function App() {
               <div className="panel">
                 <dl className="meta-grid">
                   <div>
-                    <dt>Type</dt>
+                    <dt>{t("agentDetail.type")}</dt>
                     <dd>{selectedAgent.agentType}</dd>
                   </div>
                   <div>
-                    <dt>Cron</dt>
+                    <dt>{t("agentDetail.cron")}</dt>
                     <dd>
-                      <code>{selectedAgent.cronExpression || "manual only"}</code>
+                      <code>{selectedAgent.cronExpression || t("agentDetail.manualOnly")}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Status</dt>
+                    <dt>{t("agentDetail.status")}</dt>
                     <dd>
-                      {selectedAgent.archivedAt ? "Archived" : selectedAgent.enabled ? "Enabled" : "Disabled"}
+                      {selectedAgent.archivedAt ? t("agentDetail.archived") : selectedAgent.enabled ? t("agentDetail.enabled") : t("agentDetail.disabled")}
                     </dd>
                   </div>
                   <div>
-                    <dt>Executor</dt>
+                    <dt>{t("agentDetail.executor")}</dt>
                     <dd>{selectedAgent.executorStatus}</dd>
                   </div>
                   <div>
-                    <dt>Active executions</dt>
+                    <dt>{t("agentDetail.activeExecutions")}</dt>
                     <dd>{selectedAgent.activeExecutionCount}</dd>
                   </div>
                   <div>
-                    <dt>Last heartbeat</dt>
+                    <dt>{t("agentDetail.lastHeartbeat")}</dt>
                     <dd>{formatTime(selectedAgent.lastHeartbeatAt)}</dd>
                   </div>
                   {selectedAgent.archivedAt ? (
                     <div>
-                      <dt>Archived at</dt>
+                      <dt>{t("agentDetail.archivedAt")}</dt>
                       <dd>{formatTime(selectedAgent.archivedAt)}</dd>
                     </div>
                   ) : null}
@@ -3063,21 +3624,21 @@ export default function App() {
                           handleToggleAgent(selectedAgent.id, !selectedAgent.enabled)
                         }
                       >
-                        {selectedAgent.enabled ? "Disable" : "Enable"}
+                        {selectedAgent.enabled ? t("actions.disable") : t("actions.enable")}
                       </button>
                       <button
                         className="ghost-button"
                         disabled={drainBusyAgentId === selectedAgent.id}
                         onClick={() => handleDrainAgent(selectedAgent)}
                       >
-                        {drainBusyAgentId === selectedAgent.id ? "Draining..." : "Drain"}
+                        {drainBusyAgentId === selectedAgent.id ? t("actions.draining") : t("actions.drain")}
                       </button>
                       <button
                         className="action-button action-button--cancel"
                         disabled={deleteBusyAgentId === selectedAgent.id}
                         onClick={() => handleDeleteAgent(selectedAgent)}
                       >
-                        {deleteBusyAgentId === selectedAgent.id ? "Deleting..." : "Delete"}
+                        {deleteBusyAgentId === selectedAgent.id ? t("actions.deleting") : t("actions.delete")}
                       </button>
                     </div>
 
@@ -3099,27 +3660,27 @@ export default function App() {
                             <Icon name="timer" />
                           </span>
                           <div>
-                            <h3>Upcoming Schedule</h3>
-                            <p>{selectedAgent.cronExpression || "Manual trigger only"}</p>
+                            <h3>{t("agentDetail.upcomingSchedule")}</h3>
+                            <p>{selectedAgent.cronExpression || t("agentDetail.manualOnly")}</p>
                           </div>
                         </header>
                         {selectedAgent.cronExpression ? (
                           schedulePreviewLoading ? (
-                            <div className="schedule-preview__loading">Loading upcoming runs...</div>
+                            <div className="schedule-preview__loading">{t("agentDetail.loadingUpcoming")}</div>
                           ) : schedulePreview.length > 0 ? (
                             <ol className="schedule-preview-list">
                               {schedulePreview.map((runAt, index) => (
                                 <li key={runAt}>
-                                  <span>Run {index + 1}</span>
+                                  <span>{t("agentDetail.runPrefix")} {index + 1}{t("agentDetail.runSuffix")}</span>
                                   <time dateTime={runAt}>{formatTime(runAt)}</time>
                                 </li>
                               ))}
                             </ol>
                           ) : (
-                            <p className="muted-text">No upcoming runs returned by the scheduler.</p>
+                            <p className="muted-text">{t("agentDetail.noUpcoming")}</p>
                           )
                         ) : (
-                          <p className="muted-text">This agent runs only when triggered manually or through the API.</p>
+                          <p className="muted-text">{t("agentDetail.manualDescription")}</p>
                         )}
                       </section>
 
@@ -3139,15 +3700,15 @@ export default function App() {
 
                 <dl className="agent-identity-strip">
                   <div>
-                    <dt>Handler</dt>
+                    <dt>{t("agentDetail.handler")}</dt>
                     <dd>{selectedAgent.handlerName || "-"}</dd>
                   </div>
                   <div>
-                    <dt>Executor host</dt>
+                    <dt>{t("agentDetail.executorHost")}</dt>
                     <dd>{selectedAgent.executorHost || "-"}</dd>
                   </div>
                   <div>
-                    <dt>Idempotency window</dt>
+                    <dt>{t("agentDetail.idempotencyWindow")}</dt>
                     <dd>{formatSeconds(selectedAgent.idempotencyWindowSeconds)}</dd>
                   </div>
                 </dl>
@@ -3157,9 +3718,9 @@ export default function App() {
               <div className="panel">
                 <header className="panel__header">
                   <div>
-                    <h2>Recent Executions</h2>
+                    <h2>{t("agentDetail.recentExecutions")}</h2>
                     <p>
-                      Last runs for {agentDisplayName(selectedAgent)}.
+                      {t("agentDetail.lastRunsPrefix")} {agentDisplayName(selectedAgent)}.
                     </p>
                   </div>
                 </header>
@@ -3182,13 +3743,14 @@ export default function App() {
       {/* ── Footer ──────────────────────────────────────── */}
       <footer className="app-footer">
         <span>
-          Agent Cron Hub &middot;{" "}
+          {t("product.name")} &middot;{" "}
           {lastSyncedAt
-            ? `Last sync ${new Date(lastSyncedAt).toLocaleTimeString()}`
-            : "Loading…"}
+            ? `${t("footer.lastSync")} ${new Date(lastSyncedAt).toLocaleTimeString()}`
+            : t("footer.loading")}
         </span>
-        <span>Dashboard auth</span>
+        <span>{t("footer.auth")}</span>
       </footer>
     </div>
+    </DashboardLanguageProvider>
   );
 }

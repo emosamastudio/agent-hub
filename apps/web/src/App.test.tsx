@@ -1,15 +1,20 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import {
   AgentCreatePanel,
   AgentDirectoryPanel,
   AgentSettingsPanel,
+  DashboardLanguageProvider,
+  type DashboardLanguage,
   ExecutionSummaryPanel,
   ExecutionFilterPanel,
   ExecutionHistoryPager,
   ExecutionPayloadPanel,
   AgentTriggerPanel,
   AlertPanel,
+  LanguageToggle,
+  resolveInitialDashboardLanguage,
 } from "./App";
 import {
   agentSettingsPatchFromForm,
@@ -18,9 +23,101 @@ import {
   parseTriggerPayload,
 } from "./lib/dashboard-helpers";
 
+function renderDashboardMarkup(
+  children: ReactNode,
+  language: DashboardLanguage = "en",
+): string {
+  return renderToStaticMarkup(
+    <DashboardLanguageProvider language={language}>{children}</DashboardLanguageProvider>,
+  );
+}
+
+function sampleAgent(overrides: Partial<Parameters<typeof ExecutionFilterPanel>[0]["agents"][number]> = {}) {
+  return {
+    id: "agent-1",
+    projectId: "project-1",
+    name: "daily_digest",
+    displayName: "Daily Digest",
+    agentType: "cron_task",
+    cronExpression: "0 8 * * *",
+    enabled: true,
+    executorStatus: "online",
+    activeExecutionCount: 0,
+    lastExecutionAt: null,
+    lastHeartbeatAt: null,
+    ...overrides,
+  };
+}
+
+describe("Dashboard language", () => {
+  test("defaults the dashboard language to Chinese", () => {
+    expect(resolveInitialDashboardLanguage()).toBe("zh");
+    expect(resolveInitialDashboardLanguage({
+      getItem: () => "en",
+    })).toBe("en");
+    expect(resolveInitialDashboardLanguage({
+      getItem: () => "fr",
+    })).toBe("zh");
+  });
+
+  test("renders Chinese dashboard controls when the provider language is Chinese", () => {
+    const html = renderDashboardMarkup(
+      <ExecutionFilterPanel
+        agents={[sampleAgent()]}
+        values={{
+          agentId: "agent-1",
+          status: "failed",
+          triggerType: "manual",
+        }}
+        loading={false}
+        onChange={vi.fn()}
+        onReset={vi.fn()}
+      />,
+      "zh",
+    );
+
+    expect(html).toContain("执行筛选");
+    expect(html).toContain("全部状态");
+    expect(html).toContain("重置筛选");
+    expect(html).not.toContain("Execution Filters");
+  });
+
+  test("renders English dashboard controls when the provider language is English", () => {
+    const html = renderDashboardMarkup(
+      <ExecutionFilterPanel
+        agents={[sampleAgent()]}
+        values={{
+          agentId: "agent-1",
+          status: "failed",
+          triggerType: "manual",
+        }}
+        loading={false}
+        onChange={vi.fn()}
+        onReset={vi.fn()}
+      />,
+      "en",
+    );
+
+    expect(html).toContain("Execution Filters");
+    expect(html).toContain("All statuses");
+    expect(html).toContain("Reset Filters");
+  });
+
+  test("renders an accessible language toggle", () => {
+    const html = renderToStaticMarkup(
+      <LanguageToggle language="zh" onChange={vi.fn()} />,
+    );
+
+    expect(html).toContain("中文");
+    expect(html).toContain("English");
+    expect(html).toContain("aria-pressed=\"true\"");
+    expect(html).toContain("切换 Dashboard 语言");
+  });
+});
+
 describe("AgentDirectoryPanel", () => {
   test("renders all agent statuses without the executions feed heading", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentDirectoryPanel
         projects={[
           {
@@ -96,7 +193,7 @@ describe("AgentDirectoryPanel", () => {
   });
 
   test("renders scheduler diagnostics beside each active agent", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentDirectoryPanel
         projects={[
           {
@@ -173,7 +270,7 @@ describe("AgentDirectoryPanel", () => {
   });
 
   test("can render an archived agent history list without lifecycle actions", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentDirectoryPanel
         projects={[
           {
@@ -224,7 +321,7 @@ describe("AgentDirectoryPanel", () => {
 
 describe("AgentCreatePanel", () => {
   test("renders a dashboard agent creation form", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentCreatePanel
         projects={[
           {
@@ -275,7 +372,7 @@ describe("parseTriggerPayload", () => {
 
 describe("AgentTriggerPanel", () => {
   test("renders manual trigger payload controls", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentTriggerPanel
         payloadText={'{ "topic": "daily" }'}
         busy={false}
@@ -337,7 +434,7 @@ describe("agentSettingsPatchFromForm", () => {
 
 describe("AgentSettingsPanel", () => {
   test("renders editable scheduler and runtime settings", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AgentSettingsPanel
         values={{
           displayName: "Daily Digest",
@@ -368,7 +465,7 @@ describe("AgentSettingsPanel", () => {
 
 describe("ExecutionPayloadPanel", () => {
   test("renders the execution input payload as formatted JSON", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <ExecutionPayloadPanel
         payload={{
           source: "dashboard",
@@ -385,7 +482,7 @@ describe("ExecutionPayloadPanel", () => {
 
 describe("ExecutionSummaryPanel", () => {
   test("renders scheduled and created timestamps for queued executions", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <ExecutionSummaryPanel
         execution={{
           id: "execution-1",
@@ -433,7 +530,7 @@ describe("ExecutionSummaryPanel", () => {
       progressMessage: "Halfway through extraction",
     };
 
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <ExecutionSummaryPanel execution={execution} />,
     );
 
@@ -485,7 +582,7 @@ describe("executionDisplayTime", () => {
 
 describe("ExecutionFilterPanel", () => {
   test("renders execution filter controls", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <ExecutionFilterPanel
         agents={[
           {
@@ -523,7 +620,7 @@ describe("ExecutionFilterPanel", () => {
 
 describe("ExecutionHistoryPager", () => {
   test("renders a load-more control for longer execution history", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <ExecutionHistoryPager
         visibleCount={50}
         canLoadMore={true}
@@ -539,7 +636,7 @@ describe("ExecutionHistoryPager", () => {
 
 describe("AlertPanel", () => {
   test("renders recent operational alerts", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AlertPanel
         alerts={[
           {
@@ -588,7 +685,7 @@ describe("AlertPanel", () => {
   });
 
   test("renders alert acknowledgement actions", () => {
-    const html = renderToStaticMarkup(
+    const html = renderDashboardMarkup(
       <AlertPanel
         alerts={[
           {
@@ -612,7 +709,7 @@ describe("AlertPanel", () => {
   });
 
   test("renders an empty alert state", () => {
-    const html = renderToStaticMarkup(<AlertPanel alerts={[]} />);
+    const html = renderDashboardMarkup(<AlertPanel alerts={[]} />);
 
     expect(html).toContain("Operational Alerts");
     expect(html).toContain("No active alerts");
