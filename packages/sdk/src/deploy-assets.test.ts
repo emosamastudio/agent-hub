@@ -70,6 +70,7 @@ describe("production deployment assets", () => {
     expect(script).toContain("/api/ready");
     expect(script).toContain("ops release-check");
     expect(script).toContain("--allow-warning");
+    expect(script).toContain("chmod 0600 \"$release_check_output\"");
     expect(script).toContain("AGENT_HUB_API_KEY=\"${AGENT_HUB_API_KEY:-$AGENT_HUB_DEFAULT_API_KEY}\"");
     expect(script).toContain("docker compose logs --tail=100 agent-hub");
     expect(script).not.toContain("set -x");

@@ -181,7 +181,12 @@ run_release_check() {
   printf 'Running Agent Hub release check inside the agent-hub container\n'
   if [[ -n "$release_check_output" ]]; then
     mkdir -p "$(dirname "$release_check_output")"
+    set +e
     compose exec -T agent-hub sh -lc "$release_command" | tee "$release_check_output"
+    local status="${PIPESTATUS[0]}"
+    set -e
+    chmod 0600 "$release_check_output"
+    return "$status"
   else
     compose exec -T agent-hub sh -lc "$release_command"
   fi
