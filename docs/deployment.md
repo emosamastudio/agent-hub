@@ -45,13 +45,17 @@ Deploy, wait for readiness, and run the fast release gate:
 ```bash
 deploy/deploy-compose.sh \
   --env-file /etc/agent-hub/agent-hub.env \
-  --release-check-project oph \
-  --release-check-output /var/log/agent-hub/release-check-oph.json
+  --allow-warning \
+  --release-check-output /var/log/agent-hub/release-check-initial.json
 ```
 
 Use `deploy/preflight-compose.sh` directly when you want a read-only host check
 before changing anything. Use raw `docker compose` commands only for debugging
 or explicit manual rollout control.
+
+Use `--allow-warning` only for the first empty platform deployment or other
+known-safe transitions where no consumer agents are registered yet. After OPH is
+connected, run release checks without `--allow-warning`.
 
 Verify:
 
@@ -88,7 +92,7 @@ ssh emoworklaptop_jump
 git clone https://github.com/emosamastudio/agent-hub.git ~/workspace/agent-hub
 cd ~/workspace/agent-hub
 sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
-deploy/deploy-compose.sh --env-file /etc/agent-hub/agent-hub.env --release-check-project oph --release-check-output /var/log/agent-hub/release-check-oph.json
+deploy/deploy-compose.sh --env-file /etc/agent-hub/agent-hub.env --allow-warning --release-check-output /var/log/agent-hub/release-check-initial.json
 curl -fsS http://127.0.0.1:8788/api/ready
 ```
 

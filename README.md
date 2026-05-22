@@ -46,8 +46,8 @@ target, use the production Docker Compose deployment:
 sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
 deploy/deploy-compose.sh \
   --env-file /etc/agent-hub/agent-hub.env \
-  --release-check-project oph \
-  --release-check-output /var/log/agent-hub/release-check-oph.json
+  --allow-warning \
+  --release-check-output /var/log/agent-hub/release-check-initial.json
 ```
 
 ## Core model

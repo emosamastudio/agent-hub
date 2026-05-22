@@ -62,12 +62,14 @@ describe("production deployment assets", () => {
 
     expect(stdout).toContain("--release-check-project");
     expect(stdout).toContain("--skip-release-check");
+    expect(stdout).toContain("--allow-warning");
     expect(script).toContain("set -euo pipefail");
     expect(script).toContain("preflight-compose.sh");
     expect(script).toContain("docker compose");
     expect(script).toContain("up -d --build");
     expect(script).toContain("/api/ready");
     expect(script).toContain("ops release-check");
+    expect(script).toContain("--allow-warning");
     expect(script).toContain("AGENT_HUB_API_KEY=\"${AGENT_HUB_API_KEY:-$AGENT_HUB_DEFAULT_API_KEY}\"");
     expect(script).toContain("docker compose logs --tail=100 agent-hub");
     expect(script).not.toContain("set -x");

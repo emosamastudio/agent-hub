@@ -10,6 +10,7 @@ compose_file="${repo_root}/deploy/docker-compose.production.yml"
 port="8788"
 skip_image_pull="false"
 skip_release_check="false"
+allow_warning="false"
 release_check_project=""
 release_check_output=""
 canary_agent=""
@@ -33,6 +34,7 @@ Options:
   --ready-timeout-seconds <n>      Readiness timeout. Default: 180
   --skip-image-pull                Pass through to preflight for preloaded images
   --skip-release-check             Start the service but skip the release gate
+  --allow-warning                  Allow release-check warnings during first empty deployment
   --release-check-project <name>   Project filter for ops release-check, for example oph
   --release-check-output <path>    Write release-check JSON to a host-side file
   --canary-agent <name>            Optional canary agent for release-check
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-release-check)
       skip_release_check="true"
+      shift
+      ;;
+    --allow-warning)
+      allow_warning="true"
       shift
       ;;
     --release-check-project)
@@ -142,6 +148,9 @@ wait_for_ready() {
 
 build_release_check_command() {
   local args=(ops release-check --skip-observe --execution-limit 5)
+  if [[ "$allow_warning" == "true" ]]; then
+    args+=(--allow-warning)
+  fi
   if [[ -n "$release_check_project" ]]; then
     args+=(--project "$release_check_project")
   fi
