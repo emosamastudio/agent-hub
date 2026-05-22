@@ -43,6 +43,7 @@ For hosts without a modern Node runtime, including the current `emoworklaptop`
 target, use the production Docker Compose deployment:
 
 ```bash
+sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
 deploy/deploy-compose.sh \
   --env-file /etc/agent-hub/agent-hub.env \
   --release-check-project oph \

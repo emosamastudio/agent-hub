@@ -27,13 +27,12 @@ Use Docker Compose on hosts where the system Node runtime is missing or too old
 for Agent Hub. This is the preferred deployment path for `emoworklaptop`, which
 currently has Docker available but only an obsolete system Node.
 
-Install the env file, then set at least `AGENT_HUB_POSTGRES_PASSWORD`,
-`AGENT_HUB_DASHBOARD_PASSWORD`, and `AGENT_HUB_DEFAULT_API_KEY`:
+Install the env file. The installer generates production random values for
+`AGENT_HUB_POSTGRES_PASSWORD`, `AGENT_HUB_DASHBOARD_PASSWORD`, and
+`AGENT_HUB_DEFAULT_API_KEY` without printing secret values:
 
 ```bash
-sudo install -d -m 0750 /etc/agent-hub
-sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
-sudo editor /etc/agent-hub/agent-hub.env
+sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
 ```
 
 For the Compose deployment, `DATABASE_URL` is injected as
@@ -88,9 +87,7 @@ First deploy outline:
 ssh emoworklaptop_jump
 git clone https://github.com/emosamastudio/agent-hub.git ~/workspace/agent-hub
 cd ~/workspace/agent-hub
-sudo install -d -m 0750 /etc/agent-hub
-sudo install -m 0640 deploy/agent-hub.env.example /etc/agent-hub/agent-hub.env
-sudo editor /etc/agent-hub/agent-hub.env
+sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
 deploy/deploy-compose.sh --env-file /etc/agent-hub/agent-hub.env --release-check-project oph --release-check-output /var/log/agent-hub/release-check-oph.json
 curl -fsS http://127.0.0.1:8788/api/ready
 ```
@@ -104,7 +101,14 @@ already present or will be loaded out of band.
 
 ## Environment
 
-Install the production env file from `deploy/agent-hub.env.example`:
+Install the production env file. For Docker Compose, prefer the installer:
+
+```bash
+sudo deploy/install-compose-env.sh --env-file /etc/agent-hub/agent-hub.env
+```
+
+For non-containerized systemd deployments, install and edit the example under
+the `agent-hub` service account:
 
 ```bash
 sudo install -d -m 0750 -o agent-hub -g agent-hub /etc/agent-hub

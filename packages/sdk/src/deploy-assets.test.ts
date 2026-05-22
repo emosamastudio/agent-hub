@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
 
 const repoRoot = resolve(__dirname, "../../..");
@@ -70,5 +71,40 @@ describe("production deployment assets", () => {
     expect(script).toContain("AGENT_HUB_API_KEY=\"${AGENT_HUB_API_KEY:-$AGENT_HUB_DEFAULT_API_KEY}\"");
     expect(script).toContain("docker compose logs --tail=100 agent-hub");
     expect(script).not.toContain("set -x");
+  });
+
+  test("provide a safe env installer for first Docker Compose deployment", async () => {
+    const scriptPath = resolve(repoRoot, "deploy/install-compose-env.sh");
+    const script = await readFile(scriptPath, "utf8");
+    await expect(execFileAsync("bash", ["-n", scriptPath])).resolves.toBeTruthy();
+    const { stdout: help } = await execFileAsync("bash", [scriptPath, "--help"]);
+
+    expect(help).toContain("--env-file");
+    expect(help).toContain("--force");
+    expect(script).toContain("AGENT_HUB_POSTGRES_PASSWORD");
+    expect(script).toContain("AGENT_HUB_DASHBOARD_PASSWORD");
+    expect(script).toContain("AGENT_HUB_DEFAULT_API_KEY");
+    expect(script).toContain("openssl rand -hex 32");
+    expect(script).toContain("chmod 0750");
+    expect(script).toContain("chmod 0640");
+    expect(script).not.toContain("set -x");
+
+    const tmp = await mkdtemp(join(tmpdir(), "agent-hub-env-"));
+    const envFile = join(tmp, "nested", "agent-hub.env");
+    try {
+      const { stdout } = await execFileAsync("bash", [scriptPath, "--env-file", envFile]);
+      const env = await readFile(envFile, "utf8");
+      const fileMode = (await stat(envFile)).mode & 0o777;
+
+      expect(stdout).toContain("Installed Agent Hub env file");
+      expect(stdout).not.toContain("replace-me");
+      expect(fileMode).toBe(0o640);
+      expect(env).toContain("NODE_ENV=production");
+      expect(env).not.toContain("replace-me");
+      expect(env).not.toContain("agent_hub_dev_key");
+      expect(env).not.toContain("AGENT_HUB_DASHBOARD_PASSWORD=admin");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });
