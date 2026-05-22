@@ -144,6 +144,32 @@ describe("agent-hub CLI", () => {
     });
   });
 
+  test("parses guarded ops recovery drill execution", () => {
+    expect(parseCliInvocation([
+      "ops",
+      "recovery-drill",
+      "run",
+      "--project",
+      "oph",
+      "--backup-file",
+      "/var/backups/agent-hub/rehearsal.sql",
+      "--restore-database-env-var",
+      "AGENT_HUB_RESTORE_DATABASE_URL",
+      "--command-timeout-ms",
+      "60000",
+      "--yes-reset-restore-db",
+    ])).toEqual({
+      command: "ops:recovery-drill:run",
+      options: {
+        project: "oph",
+        backupFile: "/var/backups/agent-hub/rehearsal.sql",
+        restoreDatabaseEnvVar: "AGENT_HUB_RESTORE_DATABASE_URL",
+        commandTimeoutMs: 60000,
+        confirmRestoreDatabaseReset: true,
+      },
+    });
+  });
+
   test("parses project drain invocations", () => {
     expect(parseCliInvocation(["projects", "drain", "oph"])).toEqual({
       command: "projects:drain",
@@ -697,6 +723,30 @@ describe("agent-hub CLI", () => {
     });
     expect(stdout.text).not.toContain("postgres://source-secret");
     expect(stdout.text).not.toContain("postgres://restore-secret");
+  });
+
+  test("refuses recovery drill execution without explicit confirmation", async () => {
+    const stdout = { text: "", write(chunk: string) { this.text += chunk; } };
+    const stderr = { text: "", write(chunk: string) { this.text += chunk; } };
+
+    await expect(runCli([
+      "ops",
+      "recovery-drill",
+      "run",
+      "--project",
+      "oph",
+    ], {
+      DATABASE_URL: "postgres://source-secret@db/agent_hub",
+      AGENT_HUB_RESTORE_DATABASE_URL: "postgres://restore-secret@db/agent_hub_restore",
+      AGENT_HUB_DASHBOARD_USER: "admin",
+      AGENT_HUB_DASHBOARD_PASSWORD: "secret",
+      AGENT_HUB_API_KEY: "dev-key",
+    }, { stdout, stderr })).resolves.toBe(1);
+
+    expect(stdout.text).toBe("");
+    expect(stderr.text).toContain("--yes-reset-restore-db");
+    expect(stderr.text).not.toContain("postgres://source-secret");
+    expect(stderr.text).not.toContain("postgres://restore-secret");
   });
 
   test("returns a non-zero exit code for strict failed ops status snapshots", async () => {

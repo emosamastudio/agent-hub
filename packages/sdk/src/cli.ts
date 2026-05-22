@@ -23,6 +23,7 @@ import {
   type AgentHubOpsStatusOptions,
   type AgentHubRecoveryDrillPlanOptions,
   type AgentHubRecoveryPlanOptions,
+  type AgentHubRunRecoveryDrillOptions,
   type AgentHubRunCanaryOptions,
   type AgentHubSchedulePreviewOptions,
   type AgentHubSchedulerStatusQuery,
@@ -47,6 +48,8 @@ interface CliRecoveryPlanOptions extends AgentHubRecoveryPlanOptions {}
 
 interface CliRecoveryDrillPlanOptions extends AgentHubRecoveryDrillPlanOptions {}
 
+interface CliRunRecoveryDrillOptions extends AgentHubRunRecoveryDrillOptions {}
+
 interface CliMcpConfigOptions {
   name?: string;
   command?: string;
@@ -63,6 +66,7 @@ type CliInvocation =
   | { command: "ops:observe"; options: CliOpsObserveOptions }
   | { command: "ops:recovery-plan"; options: CliRecoveryPlanOptions }
   | { command: "ops:recovery-drill-plan"; options: CliRecoveryDrillPlanOptions }
+  | { command: "ops:recovery-drill:run"; options: CliRunRecoveryDrillOptions }
   | { command: "projects:list" }
   | { command: "projects:ensure"; input: AgentHubCreateProjectInput }
   | { command: "projects:create"; input: AgentHubCreateProjectInput }
@@ -201,6 +205,24 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
           envFile: stringFlag(parsed.flags, "env-file"),
           restoreDatabaseEnvVar: stringFlag(parsed.flags, "restore-database-env-var"),
           executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+        }),
+      };
+    }
+    if (subcommand === "recovery-drill") {
+      if (third !== "run") {
+        throw new Error("Usage: agent-hub ops recovery-drill run --yes-reset-restore-db [--project <project-name-or-id>]");
+      }
+      return {
+        command: "ops:recovery-drill:run",
+        options: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
+          backupDir: stringFlag(parsed.flags, "backup-dir"),
+          backupFile: stringFlag(parsed.flags, "backup-file"),
+          envFile: stringFlag(parsed.flags, "env-file"),
+          restoreDatabaseEnvVar: stringFlag(parsed.flags, "restore-database-env-var"),
+          executionLimit: positiveNumberFlag(parsed.flags, "execution-limit"),
+          commandTimeoutMs: positiveNumberFlag(parsed.flags, "command-timeout-ms"),
+          confirmRestoreDatabaseReset: parsed.flags["yes-reset-restore-db"] === true ? true : undefined,
         }),
       };
     }
@@ -593,6 +615,12 @@ export async function runCli(
           databaseUrlConfigured: Boolean(env.DATABASE_URL),
           restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
         })
+      : invocation.command === "ops:recovery-drill:run"
+        ? await client.runRecoveryDrill({
+          ...invocation.options,
+          databaseUrlConfigured: Boolean(env.DATABASE_URL),
+          restoreDatabaseUrlConfigured: Boolean(env[invocation.options.restoreDatabaseEnvVar ?? "AGENT_HUB_RESTORE_DATABASE_URL"]),
+        })
       : await executeInvocation(client, invocation);
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (strictInvocationFailed(invocation, result)) {
@@ -607,12 +635,18 @@ export async function runCli(
 }
 
 function strictInvocationFailed(invocation: CliInvocation, result: unknown): boolean {
-  return (invocation.command === "ops:status" || invocation.command === "ops:observe")
+  if ((invocation.command === "ops:status" || invocation.command === "ops:observe")
     && invocation.options.strict === true
-    && resultOk(result) === false;
+    && resultOk(result) === false) {
+    return true;
+  }
+  return invocation.command === "ops:recovery-drill:run" && resultOk(result) === false;
 }
 
 function strictFailureMessage(invocation: CliInvocation): string {
+  if (invocation.command === "ops:recovery-drill:run") {
+    return "Agent Hub recovery drill failed";
+  }
   return invocation.command === "ops:observe"
     ? "Agent Hub ops observe failed"
     : "Agent Hub ops status failed";
@@ -660,6 +694,8 @@ async function executeInvocation(client: AgentHubControlClient, invocation: CliI
       return client.getRecoveryPlan(invocation.options);
     case "ops:recovery-drill-plan":
       return client.getRecoveryDrillPlan(invocation.options);
+    case "ops:recovery-drill:run":
+      return client.runRecoveryDrill(invocation.options);
     case "projects:list":
       return client.listProjects();
     case "projects:ensure":
@@ -891,6 +927,7 @@ function helpText(): string {
   agent-hub ops observe [--project <project-name-or-id>] [--iterations 24] [--interval-ms 3600000] [--alert-limit 20] [--execution-limit 5] [--strict] [--fail-on-warning]
   agent-hub ops recovery-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--service-name agent-hub] [--env-file /etc/agent-hub/agent-hub.env]
   agent-hub ops recovery-drill-plan [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL]
+  agent-hub ops recovery-drill run --yes-reset-restore-db [--project <project-name-or-id>] [--backup-dir /var/backups/agent-hub] [--backup-file <path>] [--env-file /etc/agent-hub/agent-hub.env] [--restore-database-env-var AGENT_HUB_RESTORE_DATABASE_URL] [--command-timeout-ms 600000]
   agent-hub projects list
   agent-hub projects ensure <project-name> [--display-name <name>] [--description <text>]
   agent-hub projects create <project-name> [--display-name <name>] [--description <text>]

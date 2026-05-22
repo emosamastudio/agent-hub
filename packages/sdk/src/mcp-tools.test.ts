@@ -14,6 +14,7 @@ describe("Agent Hub MCP tools", () => {
       "agent_hub_observe_ops_status",
       "agent_hub_get_recovery_plan",
       "agent_hub_get_recovery_drill_plan",
+      "agent_hub_run_recovery_drill",
       "agent_hub_list_projects",
       "agent_hub_ensure_project",
       "agent_hub_create_project",
@@ -256,6 +257,39 @@ describe("Agent Hub MCP tools", () => {
       databaseUrlConfigured: true,
       restoreDatabaseUrlConfigured: true,
       executionLimit: 5,
+    });
+  });
+
+  test("recovery drill run tool forwards explicit confirmation", async () => {
+    const runRecoveryDrill = vi.fn(async () => ({
+      ok: false,
+      failedCommand: { stage: "restore", exitCode: 1 },
+    }));
+    const tools = createAgentHubMcpTools({ runRecoveryDrill } as any);
+
+    await expect(tools.find((tool) => tool.name === "agent_hub_run_recovery_drill")?.handler({
+      project: "oph",
+      confirmRestoreDatabaseReset: true,
+      restoreDatabaseUrlConfigured: true,
+      databaseUrlConfigured: true,
+      commandTimeoutMs: 60000,
+    })).resolves.toEqual({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: false,
+            failedCommand: { stage: "restore", exitCode: 1 },
+          }, null, 2),
+        },
+      ],
+    });
+    expect(runRecoveryDrill).toHaveBeenCalledWith({
+      project: "oph",
+      confirmRestoreDatabaseReset: true,
+      restoreDatabaseUrlConfigured: true,
+      databaseUrlConfigured: true,
+      commandTimeoutMs: 60000,
     });
   });
 

@@ -211,6 +211,20 @@ Run the generated commands in order. The drill verifies that `pg_dump`, restore,
 migration replay, and core table integrity checks work before a real incident
 requires them.
 
+To let the CLI execute the same drill and stop on the first failed command:
+
+```bash
+node packages/sdk/dist/cli.js ops recovery-drill run \
+  --project oph \
+  --backup-dir /var/backups/agent-hub \
+  --env-file /etc/agent-hub/agent-hub.env \
+  --yes-reset-restore-db
+```
+
+The `--yes-reset-restore-db` flag is intentionally required because the command
+drops and recreates the restore database schema. Only use it after confirming
+`AGENT_HUB_RESTORE_DATABASE_URL` points at the disposable restore database.
+
 Before an upgrade:
 
 ```bash

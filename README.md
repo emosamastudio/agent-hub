@@ -256,6 +256,7 @@ node packages/sdk/dist/cli.js ops status --project oph --strict --fail-on-warnin
 node packages/sdk/dist/cli.js ops observe --project oph --iterations 24 --interval-ms 3600000 --strict --fail-on-warning --execution-limit 5
 node packages/sdk/dist/cli.js ops recovery-plan --project oph --backup-dir /var/backups/agent-hub
 node packages/sdk/dist/cli.js ops recovery-drill-plan --project oph --backup-dir /var/backups/agent-hub
+node packages/sdk/dist/cli.js ops recovery-drill run --project oph --yes-reset-restore-db
 npm run hub -- health
 node packages/sdk/dist/cli.js projects list
 node packages/sdk/dist/cli.js projects ensure oph \
@@ -337,6 +338,8 @@ Project-scoped read commands such as `agents list`, `executors list`, and `sched
 
 `ops recovery-drill-plan --project <name-or-id>` generates a safe restore rehearsal against a disposable database referenced by `AGENT_HUB_RESTORE_DATABASE_URL`. It includes source and restore database preflight checks, backup creation, restore database reset, restore import, migration replay, and table-level integrity checks. The generated commands never print either database URL.
 
+`ops recovery-drill run --project <name-or-id> --yes-reset-restore-db` executes that restore rehearsal and returns a structured command-by-command report. The confirmation flag is required because the restore database schema is dropped and recreated. The command refuses to continue if `DATABASE_URL` and `AGENT_HUB_RESTORE_DATABASE_URL` are missing or equal.
+
 `executions wait` polls one execution until it reaches `success`, `failed`, `timeout`, or `cancelled`. It is intended for agent-driven smoke tests and canaries after `trigger` returns an execution id. Add `--require-success` when the command should fail on `failed`, `timeout`, or `cancelled`.
 
 `trigger --wait` triggers the agent, reads the returned `execution_id`, then waits for the terminal execution record. Use it when a script already performed its own preflight checks.
@@ -395,6 +398,7 @@ Exposed tools:
 - `agent_hub_observe_ops_status`
 - `agent_hub_get_recovery_plan`
 - `agent_hub_get_recovery_drill_plan`
+- `agent_hub_run_recovery_drill`
 - `agent_hub_list_projects`
 - `agent_hub_ensure_project`
 - `agent_hub_create_project`

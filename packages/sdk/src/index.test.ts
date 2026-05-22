@@ -1252,6 +1252,71 @@ describe("AgentHubControlClient", () => {
     });
   });
 
+  test("runRecoveryDrill refuses to execute without explicit restore reset confirmation", async () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.runRecoveryDrill({
+      project: "oph",
+      commandRunner: async () => {
+        throw new Error("runner should not execute");
+      },
+    })).rejects.toThrow(/confirmRestoreDatabaseReset/);
+  });
+
+  test("runRecoveryDrill executes generated commands in stage order and stops on failure", async () => {
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+    const calls: Array<{ stage: string; command: string }> = [];
+
+    const report = await client.runRecoveryDrill({
+      project: "oph",
+      backupFile: "/var/backups/agent-hub/rehearsal.sql",
+      databaseUrlConfigured: true,
+      restoreDatabaseUrlConfigured: true,
+      confirmRestoreDatabaseReset: true,
+      commandRunner: async (command, context) => {
+        calls.push({ stage: context.stage, command });
+        return {
+          stage: context.stage,
+          command,
+          exitCode: context.stage === "restore" ? 1 : 0,
+          stdout: "",
+          stderr: context.stage === "restore" ? "restore failed" : "",
+          durationMs: 1,
+          timedOut: false,
+        };
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedCommand).toMatchObject({
+      stage: "restore",
+      exitCode: 1,
+      stderr: "restore failed",
+    });
+    expect(calls.map((call) => call.stage)).toEqual([
+      "preflight",
+      "preflight",
+      "preflight",
+      "preflight",
+      "preflight",
+      "preflight",
+      "preflight",
+      "backup",
+      "backup",
+      "restore",
+    ]);
+  });
+
   test("doctor reports a missing requested project as an error", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString();

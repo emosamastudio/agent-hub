@@ -1,4 +1,5 @@
 // packages/sdk/src/index.ts
+import { spawn } from "node:child_process";
 
 export interface AgentHubConfig {
   serverUrl: string;
@@ -369,6 +370,43 @@ export interface AgentHubRecoveryDrillPlan {
   warnings: string[];
 }
 
+export type AgentHubRecoveryDrillStage = "preflight" | "backup" | "restore" | "verify";
+
+export interface AgentHubRecoveryDrillCommandContext {
+  stage: AgentHubRecoveryDrillStage;
+  timeoutMs: number;
+}
+
+export interface AgentHubRecoveryDrillCommandResult {
+  stage: AgentHubRecoveryDrillStage;
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+}
+
+export type AgentHubRecoveryDrillCommandRunner = (
+  command: string,
+  context: AgentHubRecoveryDrillCommandContext,
+) => Promise<AgentHubRecoveryDrillCommandResult>;
+
+export interface AgentHubRunRecoveryDrillOptions extends AgentHubRecoveryDrillPlanOptions {
+  confirmRestoreDatabaseReset?: boolean;
+  commandTimeoutMs?: number;
+  commandRunner?: AgentHubRecoveryDrillCommandRunner;
+}
+
+export interface AgentHubRunRecoveryDrillReport {
+  ok: boolean;
+  startedAt: string;
+  finishedAt: string;
+  plan: AgentHubRecoveryDrillPlan;
+  commands: AgentHubRecoveryDrillCommandResult[];
+  failedCommand?: AgentHubRecoveryDrillCommandResult;
+}
+
 export interface AgentHubDrainAgentResult {
   ok: true;
   agent_id: string;
@@ -538,6 +576,57 @@ function doctorFailureMessage(stage: string, report: AgentHubDoctorReport): stri
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runShellCommand(
+  command: string,
+  context: AgentHubRecoveryDrillCommandContext,
+): Promise<AgentHubRecoveryDrillCommandResult> {
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const child = spawn(command, {
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, context.timeoutMs);
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      resolve({
+        stage: context.stage,
+        command,
+        exitCode: 1,
+        stdout,
+        stderr: stderr ? `${stderr}\n${error.message}` : error.message,
+        durationMs: Date.now() - startedAt,
+        timedOut,
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({
+        stage: context.stage,
+        command,
+        exitCode: code,
+        stdout,
+        stderr,
+        durationMs: Date.now() - startedAt,
+        timedOut,
+      });
+    });
+  });
 }
 
 export class AgentHubControlClient {
@@ -909,6 +998,50 @@ export class AgentHubControlClient {
         ],
       },
       warnings,
+    };
+  }
+
+  async runRecoveryDrill(options: AgentHubRunRecoveryDrillOptions = {}): Promise<AgentHubRunRecoveryDrillReport> {
+    if (options.confirmRestoreDatabaseReset !== true) {
+      throw new Error("Recovery drill execution requires confirmRestoreDatabaseReset=true. In the CLI, pass --yes-reset-restore-db after verifying AGENT_HUB_RESTORE_DATABASE_URL points at a disposable database.");
+    }
+
+    const startedAt = new Date().toISOString();
+    const plan = this.getRecoveryDrillPlan(options);
+    const timeoutMs = positiveIntegerOr(options.commandTimeoutMs, 10 * 60 * 1000);
+    const commandRunner = options.commandRunner ?? runShellCommand;
+    const commands: AgentHubRecoveryDrillCommandResult[] = [];
+    const commandEntries: Array<{ stage: AgentHubRecoveryDrillStage; command: string }> = [
+      ...plan.preflight.commands.map((command) => ({ stage: "preflight" as const, command })),
+      ...plan.backup.commands.map((command) => ({ stage: "backup" as const, command })),
+      ...plan.restore.commands.map((command) => ({ stage: "restore" as const, command })),
+      ...plan.verify.commands.map((command) => ({ stage: "verify" as const, command })),
+    ];
+
+    for (const entry of commandEntries) {
+      const result = await commandRunner(entry.command, {
+        stage: entry.stage,
+        timeoutMs,
+      });
+      commands.push(result);
+      if (result.exitCode !== 0 || result.timedOut) {
+        return {
+          ok: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          plan,
+          commands,
+          failedCommand: result,
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      plan,
+      commands,
     };
   }
 
