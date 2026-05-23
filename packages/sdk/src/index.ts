@@ -467,6 +467,7 @@ export type AgentHubAgentType = 'cron_task' | 'llm_agent';
 export type AgentHubMisfirePolicy = 'fire_once' | 'fire_all' | 'drop';
 
 export interface AgentHubCreateAgentInput {
+  project?: string;
   projectId?: string;
   name: string;
   displayName: string;
@@ -1260,7 +1261,12 @@ export class AgentHubControlClient {
   }
 
   async createAgent(input: AgentHubCreateAgentInput): Promise<unknown> {
-    return this.requestJson('POST', '/api/agents', input, 'dashboard');
+    const { project, ...body } = input;
+    const projectId = body.projectId ?? (project ? (await this.resolveProject(project)).id : undefined);
+    return this.requestJson('POST', '/api/agents', {
+      ...body,
+      projectId,
+    }, 'dashboard');
   }
 
   async updateAgent(

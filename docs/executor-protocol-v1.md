@@ -279,3 +279,5 @@ node packages/sdk/dist/cli.js executions list --project <project-id> --status qu
 node packages/sdk/dist/cli.js executions list --project <project-id> --agent deep_research --status failed --limit 20
 node packages/sdk/dist/cli.js executions inspect <execution-id>
 ```
+
+`--project` accepts either a project id or project name. For dashboard-managed schedules, `agents create <name> --project oph ...` resolves `oph` to the project id before creating the Agent record.

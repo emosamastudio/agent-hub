@@ -574,10 +574,13 @@ describe("agent-hub CLI", () => {
       "25",
       "--labels",
       "{\"team\":\"ops\"}",
+      "--project",
+      "oph",
       "--disabled",
     ])).toEqual({
       command: "agents:create",
       input: {
+        project: "oph",
         name: "demo_agent",
         displayName: "Demo Agent",
         description: "Runs the demo handler for manual operator validation.",

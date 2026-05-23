@@ -375,6 +375,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
       name: "agent_hub_create_agent",
       description: "Create or upsert a dashboard-managed agent schedule.",
       inputSchema: {
+        project: z.string().optional(),
         projectId: z.string().optional(),
         name: z.string().min(1),
         displayName: z.string().min(1),
@@ -397,6 +398,7 @@ export function createAgentHubMcpTools(client: AgentHubControlClient): AgentHubM
         labels: z.record(z.string(), z.string()).optional(),
       },
       handler: async (args) => toMcpText(await client.createAgent(compactDefined({
+        project: stringArg(args.project),
         projectId: stringArg(args.projectId),
         name: args.name as string,
         displayName: args.displayName as string,

@@ -410,6 +410,7 @@ export function parseCliInvocation(argv: string[]): CliInvocation {
       return {
         command: "agents:create",
         input: compactDefined({
+          project: stringFlag(parsed.flags, "project"),
           projectId: stringFlag(parsed.flags, "project-id"),
           name: third,
           displayName,
@@ -997,7 +998,7 @@ function helpText(): string {
   agent-hub alerts acknowledge <alert-id> [--by <actor>]
   agent-hub agents list [--status online] [--type cron_task] [--archived active|include|only]
   agent-hub agents get <agent-id-or-name> [--project <project-name-or-id>] [--include-archived]
-  agent-hub agents create <agent-name> --display-name <name> --description <text> [--type cron_task] [--cron <expr>] [--handler <name>] [--disabled]
+  agent-hub agents create <agent-name> --display-name <name> --description <text> [--project <project-name-or-id>] [--type cron_task] [--cron <expr>] [--handler <name>] [--disabled]
   agent-hub agents update <agent-id-or-name> [--project <project-name-or-id>] [--display-name <name>] [--cron <expr>|--clear-cron] [--handler <name>|--clear-handler]
   agent-hub agents schedule-preview <agent-id-or-name> [--project <project-name-or-id>] [--limit 5]
   agent-hub agents enable <agent-id-or-name> [--project <project-name-or-id>]

@@ -780,6 +780,7 @@ describe("Agent Hub MCP tools", () => {
     const tools = createAgentHubMcpTools({ createAgent, updateAgent } as any);
 
     await expect(tools.find((tool) => tool.name === "agent_hub_create_agent")?.handler({
+      project: "oph",
       name: "demo_agent",
       displayName: "Demo Agent",
       description: "Runs the demo handler for MCP-driven agent creation.",
@@ -813,6 +814,7 @@ describe("Agent Hub MCP tools", () => {
     });
 
     expect(createAgent).toHaveBeenCalledWith({
+      project: "oph",
       name: "demo_agent",
       displayName: "Demo Agent",
       description: "Runs the demo handler for MCP-driven agent creation.",

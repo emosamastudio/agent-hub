@@ -2221,6 +2221,59 @@ describe("AgentHubControlClient", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  test("createAgent resolves a project name before posting a dashboard-managed agent", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input.toString();
+      requests.push({ url, init });
+
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([
+          { id: "project-1", name: "default", displayName: "Default" },
+          { id: "project-oph", name: "oph", displayName: "Open Source Project Hunter" },
+        ]);
+      }
+
+      if (url === "http://hub/api/agents") {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(init?.body as string)).toEqual({
+          projectId: "project-oph",
+          name: "demo_agent",
+          displayName: "Demo Agent",
+          description: "Runs the demo handler for SDK executor tests.",
+          agentType: "cron_task",
+          cronExpression: "*/15 * * * *",
+          handlerName: "demo_handler",
+        });
+        return jsonResponse({ id: "agent-1", name: "demo_agent", projectId: "project-oph" }, { status: 201 });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.createAgent({
+      project: "oph",
+      name: "demo_agent",
+      displayName: "Demo Agent",
+      description: "Runs the demo handler for SDK executor tests.",
+      agentType: "cron_task",
+      cronExpression: "*/15 * * * *",
+      handlerName: "demo_handler",
+    })).resolves.toEqual({ id: "agent-1", name: "demo_agent", projectId: "project-oph" });
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://hub/api/projects",
+      "http://hub/api/agents",
+    ]);
+  });
+
   test("updateAgent patches dashboard-managed agent settings", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(input.toString()).toBe(`http://hub/api/agents/${directAgentId}`);
