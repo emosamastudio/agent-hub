@@ -182,13 +182,13 @@ For deterministic tests or one-shot workers, call `await hub.runOnce()` to poll 
 ## Go SDK
 
 The Go SDK is intended for Go services that run real executor workers in their
-own repository. It wraps registry sync, heartbeat/progress, poll, and final
-execution reporting.
+own repository. It wraps registry sync, heartbeat/progress, poll, execution
+trace logs, and final execution reporting.
 
 Production consumers should pin the tagged nested module:
 
 ```go
-require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.3.0
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.4.0
 ```
 
 ```go
@@ -230,7 +230,9 @@ func main() {
 
 `Run` validates the registered Go agents against the mux before syncing the
 registry. A missing handler fails locally before Agent Hub can schedule work to
-that executor.
+that executor. `ctx.Log(...)` still prints an execution-scoped local log line,
+and now also records a `tool`/`log` trace span that is flushed to Agent Hub
+before the final report. Use `ctx.RecordTrace(...)` for custom spans.
 
 For local source integration when testing unreleased changes, consumers can use
 a temporary Go module replace:

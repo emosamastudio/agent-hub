@@ -77,6 +77,26 @@ type Result struct {
 	TraceCountExpected int            `json:"trace_count_expected,omitempty"`
 }
 
+// TraceSpan is one execution trace record sent to Agent Hub before the final report.
+type TraceSpan struct {
+	TurnIndex     int            `json:"turn_index"`
+	SpanIndex     int            `json:"span_index,omitempty"`
+	ParentSpanID  string         `json:"parent_span_id,omitempty"`
+	Role          string         `json:"role"`
+	SpanType      string         `json:"span_type,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	Provider      string         `json:"provider,omitempty"`
+	InputContent  string         `json:"input_content,omitempty"`
+	OutputContent string         `json:"output_content,omitempty"`
+	ToolCalls     any            `json:"tool_calls,omitempty"`
+	ToolResults   any            `json:"tool_results,omitempty"`
+	InputTokens   int            `json:"input_tokens,omitempty"`
+	OutputTokens  int            `json:"output_tokens,omitempty"`
+	CostEstimate  float64        `json:"cost_estimate,omitempty"`
+	LatencyMS     int            `json:"latency_ms,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
 // ExecutionProgress is sent through executor heartbeat.
 type ExecutionProgress struct {
 	ExecutionID     string `json:"execution_id"`
@@ -94,6 +114,10 @@ type HeartbeatResult struct {
 type heartbeatRequest struct {
 	AgentNames []string            `json:"agent_names"`
 	Executions []ExecutionProgress `json:"executions,omitempty"`
+}
+
+type traceBatchRequest struct {
+	Traces []TraceSpan `json:"traces"`
 }
 
 // HandlerFunc handles one hub-dispatched job.
@@ -242,6 +266,18 @@ func (c *Client) Report(ctx context.Context, executionID string, result Result) 
 	return closeResponse(resp)
 }
 
+func (c *Client) postTraces(ctx context.Context, executionID string, traces []TraceSpan) error {
+	if len(traces) == 0 {
+		return nil
+	}
+	path := "/api/executions/" + url.PathEscape(executionID) + "/traces"
+	resp, err := c.do(ctx, http.MethodPost, path, traceBatchRequest{Traces: traces})
+	if err != nil {
+		return err
+	}
+	return closeResponse(resp)
+}
+
 // Run validates handler wiring, syncs the registry, heartbeats in the background, polls continuously, and reports results.
 func (c *Client) Run(ctx context.Context, mux *ServeMux) error {
 	if mux == nil {
@@ -336,10 +372,15 @@ func (c *Client) handleJob(ctx context.Context, mux *ServeMux, job *Job) Result 
 		client: c,
 		job:    job,
 	}
+	var result Result
 	if err := handler(execCtx, job); err != nil {
-		return Result{Status: StatusFailed, ErrorMessage: err.Error()}
+		result = Result{Status: StatusFailed, ErrorMessage: err.Error()}
+	} else {
+		result = Result{Status: StatusSuccess}
 	}
-	return Result{Status: StatusSuccess}
+	result.TraceCountExpected = execCtx.TraceCount()
+	_ = execCtx.FlushTraces()
+	return result
 }
 
 func (c *Client) resolveHandler(job *Job) string {

@@ -43,15 +43,15 @@ github.com/emosamastudio/agent-hub/sdks/go/agenthub
 Production consumers should use a tagged version:
 
 ```go
-require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.3.0
+require github.com/emosamastudio/agent-hub/sdks/go/agenthub v0.4.0
 ```
 
 Because the SDK is a nested Go module, the matching git tag must be created with
 the module directory prefix:
 
 ```bash
-git tag sdks/go/agenthub/v0.3.0
-git push origin sdks/go/agenthub/v0.3.0
+git tag sdks/go/agenthub/v0.4.0
+git push origin sdks/go/agenthub/v0.4.0
 ```
 
 Local source integration can use a temporary replace:
@@ -60,9 +60,10 @@ Local source integration can use a temporary replace:
 replace github.com/emosamastudio/agent-hub/sdks/go/agenthub => ../agent-hub/sdks/go/agenthub
 ```
 
-`v0.3.0` is the current Go SDK tag for this protocol. It includes protocol
-version headers, required agent descriptions, and local handler validation
-before registry sync. Consumers using `v0.1.0` must upgrade before syncing
+`v0.4.0` is the current Go SDK tag for this protocol. It includes protocol
+version headers, required agent descriptions, local handler validation before
+registry sync, and Go execution trace upload through `ctx.Log(...)` and
+`ctx.RecordTrace(...)`. Consumers using `v0.1.0` must upgrade before syncing
 agents against this protocol version, otherwise registrations without
 `description` will be rejected with field-level validation details.
 
@@ -226,6 +227,40 @@ Stable work response fields:
 }
 ```
 
+### Trace Batch
+
+```http
+POST /api/executions/:id/traces
+```
+
+Executors may upload trace spans before the final report. The Go SDK flushes
+spans recorded through `ctx.Log(...)` and `ctx.RecordTrace(...)` automatically.
+
+Request fields:
+
+```json
+{
+  "traces": [
+    {
+      "turn_index": 0,
+      "span_index": 0,
+      "role": "tool",
+      "span_type": "log",
+      "output_content": "processing example/repo"
+    }
+  ]
+}
+```
+
+Stable success response:
+
+```json
+{
+  "ok": true,
+  "count": 1
+}
+```
+
 ### Report
 
 ```http
@@ -241,7 +276,7 @@ Request fields:
   "result_data": {},
   "error_message": "",
   "error_stack": "",
-  "trace_count_expected": 0
+  "trace_count_expected": 1
 }
 ```
 

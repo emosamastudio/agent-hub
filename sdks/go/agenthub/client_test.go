@@ -13,6 +13,15 @@ import (
 
 func TestClientRunRegistersPollsAndReports(t *testing.T) {
 	reported := make(chan Result, 1)
+	traced := make(chan struct {
+		Traces []struct {
+			TurnIndex     int    `json:"turn_index"`
+			SpanIndex     int    `json:"span_index"`
+			Role          string `json:"role"`
+			SpanType      string `json:"span_type"`
+			OutputContent string `json:"output_content"`
+		} `json:"traces"`
+	}, 1)
 	var registered AgentSpec
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +48,22 @@ func TestClientRunRegistersPollsAndReports(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"exec-1","agentId":"agent-1","agentName":"deep_research","handlerName":"deep_research_handler","triggerType":"manual","inputPayload":{"repo_name":"openai-go"},"timeoutSeconds":60}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/executions/exec-1/traces":
+			var body struct {
+				Traces []struct {
+					TurnIndex     int    `json:"turn_index"`
+					SpanIndex     int    `json:"span_index"`
+					Role          string `json:"role"`
+					SpanType      string `json:"span_type"`
+					OutputContent string `json:"output_content"`
+				} `json:"traces"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode traces: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"count":1}`))
+			traced <- body
 		case r.Method == http.MethodPost && r.URL.Path == "/api/executions/exec-1/report":
 			var result Result
 			if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
@@ -72,6 +97,7 @@ func TestClientRunRegistersPollsAndReports(t *testing.T) {
 		if ctx.Payload()["repo_name"] != "openai-go" {
 			t.Fatalf("context payload = %v", ctx.Payload())
 		}
+		ctx.Log("processing %s", job.InputPayload["repo_name"])
 		return nil
 	})
 
@@ -87,8 +113,29 @@ func TestClientRunRegistersPollsAndReports(t *testing.T) {
 		if result.Status != StatusSuccess {
 			t.Fatalf("report status = %q", result.Status)
 		}
+		if result.TraceCountExpected != 1 {
+			t.Fatalf("trace count expected = %d", result.TraceCountExpected)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for report")
+	}
+	select {
+	case body := <-traced:
+		if len(body.Traces) != 1 {
+			t.Fatalf("trace count = %d", len(body.Traces))
+		}
+		trace := body.Traces[0]
+		if trace.TurnIndex != 0 || trace.SpanIndex != 0 {
+			t.Fatalf("trace indexes = %d/%d", trace.TurnIndex, trace.SpanIndex)
+		}
+		if trace.Role != "tool" || trace.SpanType != "log" {
+			t.Fatalf("trace role/type = %q/%q", trace.Role, trace.SpanType)
+		}
+		if trace.OutputContent != "processing openai-go" {
+			t.Fatalf("trace output = %q", trace.OutputContent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for traces")
 	}
 	cancel()
 	select {
