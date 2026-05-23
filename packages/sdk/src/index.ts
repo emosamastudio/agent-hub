@@ -263,6 +263,14 @@ export interface AgentHubOpsStatusOptions {
   failOnWarning?: boolean;
 }
 
+export interface AgentHubTraceCoverageSummary {
+  status: 'ok' | 'warning' | 'skipped';
+  sampled: number;
+  withTraces: number;
+  withoutTraces: number;
+  message: string;
+}
+
 export interface AgentHubObserveOpsStatusOptions extends AgentHubOpsStatusOptions {
   iterations?: number;
   intervalMs?: number;
@@ -296,9 +304,11 @@ export interface AgentHubOpsStatusReport {
   executions: {
     queued: unknown[];
     running: unknown[];
+    success: unknown[];
     failed: unknown[];
     timeout: unknown[];
   };
+  traceCoverage?: AgentHubTraceCoverageSummary;
   alerts: unknown[];
 }
 
@@ -554,6 +564,50 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
 function numberRecordField(record: unknown, key: string): number | null {
   const value = objectRecord(record)?.[key];
   return typeof value === 'number' ? value : null;
+}
+
+function numberRecordFieldAny(record: unknown, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = numberRecordField(record, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function summarizeTraceCoverage(successfulExecutions: unknown[]): AgentHubTraceCoverageSummary {
+  const sampled = successfulExecutions.length;
+  if (sampled === 0) {
+    return {
+      status: 'skipped',
+      sampled,
+      withTraces: 0,
+      withoutTraces: 0,
+      message: 'No recent successful executions sampled',
+    };
+  }
+
+  const withTraces = successfulExecutions.filter((execution) => (
+    (numberRecordFieldAny(execution, ['traceCountActual', 'trace_count_actual']) ?? 0) > 0
+  )).length;
+  const withoutTraces = sampled - withTraces;
+
+  if (withTraces === 0) {
+    return {
+      status: 'warning',
+      sampled,
+      withTraces,
+      withoutTraces,
+      message: 'Recent successful executions have no recorded traces',
+    };
+  }
+
+  return {
+    status: 'ok',
+    sampled,
+    withTraces,
+    withoutTraces,
+    message: `${withTraces}/${sampled} recent successful execution(s) recorded traces`,
+  };
 }
 
 function schedulerRunningMetric(metrics: unknown): boolean | null {
@@ -816,6 +870,7 @@ export class AgentHubControlClient {
     let executions: AgentHubOpsStatusReport["executions"] = {
       queued: [],
       running: [],
+      success: [],
       failed: [],
       timeout: [],
     };
@@ -829,7 +884,7 @@ export class AgentHubControlClient {
       agents = await this.listAgentsByProjectId(projectQuery);
       executors = await this.listExecutorsByProjectId(projectQuery);
       const executionLimit = positiveIntegerOr(options.executionLimit, 5);
-      const [queued, running, failed, timeout] = await Promise.all([
+      const [queued, running, success, failed, timeout] = await Promise.all([
         this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
           ...projectQuery,
           status: 'queued',
@@ -838,6 +893,11 @@ export class AgentHubControlClient {
         this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
           ...projectQuery,
           status: 'running',
+          limit: executionLimit,
+        }), undefined, 'dashboard'),
+        this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
+          ...projectQuery,
+          status: 'success',
           limit: executionLimit,
         }), undefined, 'dashboard'),
         this.requestJson<unknown[]>('GET', this.pathWithQuery('/api/executions', {
@@ -854,14 +914,18 @@ export class AgentHubControlClient {
       executions = {
         queued,
         running,
+        success,
         failed,
         timeout,
       };
     }
     const alerts = await this.listAlerts({ limit: options.alertLimit ?? 20 });
     const metrics = doctor.metrics;
+    const traceCoverage = summarizeTraceCoverage(executions.success);
+    const traceCoverageWarnings = traceCoverage.status === 'warning' ? 1 : 0;
+    const warningCount = doctor.summary.warnings + traceCoverageWarnings;
 
-    const ok = doctor.ok && (options.failOnWarning === true ? doctor.summary.warnings === 0 : true);
+    const ok = doctor.ok && (options.failOnWarning === true ? warningCount === 0 : true);
 
     return {
       ok,
@@ -870,7 +934,7 @@ export class AgentHubControlClient {
       project: doctor.project,
       summary: {
         errors: doctor.summary.errors,
-        warnings: doctor.summary.warnings,
+        warnings: warningCount,
         schedulerRunning: schedulerRunningMetric(metrics),
         agentsTotal: agents.length,
         agentsOnline: countOnlineRecords(agents, ['executorStatus', 'executor_status', 'status']),
@@ -887,6 +951,7 @@ export class AgentHubControlClient {
       agents,
       executors,
       executions,
+      traceCoverage,
       alerts,
     };
   }

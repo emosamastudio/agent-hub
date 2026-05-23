@@ -930,6 +930,7 @@ describe("AgentHubControlClient", () => {
     ];
     const queuedExecutions = [{ id: "exec-queued", status: "queued", agentId: "agent-1" }];
     const runningExecutions = [{ id: "exec-running", status: "running", agentId: "agent-1" }];
+    const successExecutions = [{ id: "exec-success", status: "success", agentId: "agent-1", traceCountActual: 2 }];
     const failedExecutions = [{ id: "exec-failed", status: "failed", agentId: "agent-2" }];
     const timeoutExecutions = [{ id: "exec-timeout", status: "timeout", agentId: "agent-2" }];
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
@@ -949,6 +950,7 @@ describe("AgentHubControlClient", () => {
       if (url === "http://hub/api/scheduler/status?project=project-1") return jsonResponse(scheduler);
       if (url === "http://hub/api/executions?project=project-1&status=queued&limit=3") return jsonResponse(queuedExecutions);
       if (url === "http://hub/api/executions?project=project-1&status=running&limit=3") return jsonResponse(runningExecutions);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=3") return jsonResponse(successExecutions);
       if (url === "http://hub/api/executions?project=project-1&status=failed&limit=3") return jsonResponse(failedExecutions);
       if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=3") return jsonResponse(timeoutExecutions);
       if (url === "http://hub/api/alerts?limit=5") return jsonResponse(alerts);
@@ -990,8 +992,15 @@ describe("AgentHubControlClient", () => {
       executions: {
         queued: queuedExecutions,
         running: runningExecutions,
+        success: successExecutions,
         failed: failedExecutions,
         timeout: timeoutExecutions,
+      },
+      traceCoverage: {
+        status: "ok",
+        sampled: 1,
+        withTraces: 1,
+        withoutTraces: 0,
       },
     });
     expect(requests).toEqual([
@@ -1007,10 +1016,77 @@ describe("AgentHubControlClient", () => {
       "http://hub/api/executors?project=project-1",
       "http://hub/api/executions?project=project-1&status=queued&limit=3",
       "http://hub/api/executions?project=project-1&status=running&limit=3",
+      "http://hub/api/executions?project=project-1&status=success&limit=3",
       "http://hub/api/executions?project=project-1&status=failed&limit=3",
       "http://hub/api/executions?project=project-1&status=timeout&limit=3",
       "http://hub/api/alerts?limit=5",
     ]);
+  });
+
+  test("getOpsStatus warns when recent successful executions have no trace coverage", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "http://hub/api/health") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/ready") return jsonResponse({ status: "ok" });
+      if (url === "http://hub/api/metrics") return jsonResponse({ scheduler: { running: true }, alerts_active: 0 });
+      if (url === "http://hub/api/projects") {
+        return jsonResponse([{ id: "project-1", name: "oph", displayName: "Open Source Project Hunter" }]);
+      }
+      if (url === "http://hub/api/agents?project=project-1") {
+        return jsonResponse([{ id: "agent-1", name: "deep_research_sweep", executorStatus: "online" }]);
+      }
+      if (url === "http://hub/api/executors?project=project-1") {
+        return jsonResponse([{ agent_name: "deep_research_sweep", executor_status: "online" }]);
+      }
+      if (url === "http://hub/api/alerts?limit=20") return jsonResponse([]);
+      if (url === "http://hub/api/scheduler/status?project=project-1") {
+        return jsonResponse({ runtime: { running: true }, agents: [] });
+      }
+      if (url === "http://hub/api/executions?project=project-1&status=queued&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=running&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=2") {
+        return jsonResponse([
+          { id: "exec-1", status: "success", traceCountActual: 0, traceCountExpected: null },
+          { id: "exec-2", status: "success", traceCountActual: 0, traceCountExpected: null },
+        ]);
+      }
+      if (url === "http://hub/api/executions?project=project-1&status=failed&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=2") return jsonResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentHubControlClient({
+      serverUrl: "http://hub",
+      dashboardUsername: "admin",
+      dashboardPassword: "secret",
+      apiKey: "dev-key",
+    });
+
+    await expect(client.getOpsStatus({
+      project: "oph",
+      executionLimit: 2,
+      failOnWarning: true,
+    })).resolves.toMatchObject({
+      ok: false,
+      summary: {
+        errors: 0,
+        warnings: 1,
+      },
+      traceCoverage: {
+        status: "warning",
+        sampled: 2,
+        withTraces: 0,
+        withoutTraces: 2,
+        message: "Recent successful executions have no recorded traces",
+      },
+      executions: {
+        success: [
+          { id: "exec-1", status: "success", traceCountActual: 0, traceCountExpected: null },
+          { id: "exec-2", status: "success", traceCountActual: 0, traceCountExpected: null },
+        ],
+      },
+    });
   });
 
   test("getOpsStatus can treat warnings as a failed snapshot", async () => {
@@ -1036,6 +1112,9 @@ describe("AgentHubControlClient", () => {
       }
       if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=5") {
+        return jsonResponse([{ id: "exec-success", status: "success", traceCountActual: 1 }]);
+      }
       if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
       throw new Error(`Unexpected request: ${url}`);
@@ -1082,6 +1161,9 @@ describe("AgentHubControlClient", () => {
       }
       if (url === "http://hub/api/executions?project=project-1&status=queued&limit=2") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=running&limit=2") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=2") {
+        return jsonResponse([{ id: "exec-success", status: "success", traceCountActual: 1 }]);
+      }
       if (url === "http://hub/api/executions?project=project-1&status=failed&limit=2") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=2") return jsonResponse([]);
       if (url === "http://hub/api/alerts?limit=20") {

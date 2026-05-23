@@ -271,6 +271,12 @@ node packages/sdk/dist/cli.js canary run enrich_repo \
   --timeout-ms 600000
 ```
 
+`ops status` samples recent successful executions as part of the same release
+gate. When the sample exists but every execution has `traceCountActual = 0`,
+the report includes `traceCoverage.status = "warning"`; with
+`--fail-on-warning`, this fails the gate. This catches executor deployments that
+are online and reporting success but are not uploading trace spans.
+
 Use a low-risk OPH handler for first smoke. Run `deep_research` only during the formal canary because it can invoke sidecars/LLMs and write research artifacts.
 
 ## Backup And Upgrade

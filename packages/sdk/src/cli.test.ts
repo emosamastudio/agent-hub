@@ -901,6 +901,9 @@ describe("agent-hub CLI", () => {
       }
       if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=5") {
+        return jsonResponse([{ id: "exec-success", status: "success", traceCountActual: 1 }]);
+      }
       if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
       throw new Error(`Unexpected request: ${url}`);
@@ -957,6 +960,9 @@ describe("agent-hub CLI", () => {
       }
       if (url === "http://hub/api/executions?project=project-1&status=queued&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=running&limit=5") return jsonResponse([]);
+      if (url === "http://hub/api/executions?project=project-1&status=success&limit=5") {
+        return jsonResponse([{ id: "exec-success", status: "success", traceCountActual: 1 }]);
+      }
       if (url === "http://hub/api/executions?project=project-1&status=failed&limit=5") return jsonResponse([]);
       if (url === "http://hub/api/executions?project=project-1&status=timeout&limit=5") return jsonResponse([]);
       throw new Error(`Unexpected request: ${url}`);
