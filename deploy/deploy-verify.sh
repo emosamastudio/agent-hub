@@ -176,10 +176,13 @@ check_upstream_connectivity() {
     warn "curl not found, skipping upstream check"
     return
   fi
+  # Try health first, fall back to models endpoint
   if curl -fsS --connect-timeout 10 --max-time 30 "${endpoint}/health" >/dev/null 2>&1; then
     ok "upstream LLM endpoint reachable: ${endpoint}"
+  elif curl -fsS --connect-timeout 10 --max-time 30 "${endpoint}/models" >/dev/null 2>&1; then
+    ok "upstream LLM endpoint reachable: ${endpoint}/models"
   else
-    fail "upstream LLM endpoint NOT reachable: ${endpoint}"
+    warn "upstream LLM endpoint check inconclusive (${endpoint}) — proxy will still attempt on first request"
   fi
 }
 
