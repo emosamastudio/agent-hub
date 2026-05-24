@@ -52,6 +52,23 @@ function firstHeader(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
+/** Extract the last user message from an OpenAI/Anthropic messages array for trace display */
+function extractInputContent(body: Record<string, unknown> | undefined): string | undefined {
+  const messages = body?.messages;
+  if (!Array.isArray(messages)) return undefined;
+  // Find the last user message (not system, not tool)
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as Record<string, unknown> | undefined;
+    if (msg?.role === "user" && typeof msg.content === "string" && msg.content.length > 0) {
+      return msg.content;
+    }
+  }
+  // Fallback: last message of any role
+  const last = messages[messages.length - 1] as Record<string, unknown> | undefined;
+  if (last && typeof last.content === "string") return last.content;
+  return undefined;
+}
+
 // ── Provider configs ──
 
 function anthropicProvider(deps: LlmProxyDependencies): ProviderConfig {
@@ -157,13 +174,15 @@ function createProxyHandler(deps: LlmProxyDependencies, provider: ProviderConfig
 
     const executionId = tokenRow.executionId;
 
-    // 4. Reconstruct raw body
+    // 4. Reconstruct raw body and extract display content
     const rawBody = JSON.stringify(request.body);
-
-    // 5. Extract model name
     const body = request.body as Record<string, unknown> | undefined;
     const model = typeof body?.model === "string" ? body.model : null;
     const isStreaming = body?.stream === true;
+    const inputContent = extractInputContent(body) ?? rawBody;
+
+    // 5. Get next turn index
+    const turnIndex = await deps.traceRepo.getNextTurnIndex(executionId);
 
     // 6. Build upstream headers
     const upstreamHeaders: Record<string, string> = { "content-type": "application/json" };
@@ -190,15 +209,15 @@ function createProxyHandler(deps: LlmProxyDependencies, provider: ProviderConfig
       const errorBody = await upstreamResp.text().catch(() => "");
       await deps.traceRepo.insertBatch([{
         executionId,
-        turnIndex: 0,
+        turnIndex,
         role: "system",
         spanType: "llm",
         model: model ?? undefined,
         provider: provider.provider,
-        inputContent: rawBody,
+        inputContent,
         outputContent: errorBody,
         latencyMs: Date.now() - startTime,
-        metadata: { error: true, statusCode: upstreamResp.status },
+        metadata: { error: true, statusCode: upstreamResp.status, _rawInput: rawBody },
       }]);
       await deps.executionRepo.incrementTraceCount(executionId, 1);
       return reply.status(upstreamResp.status).send(errorBody);
@@ -213,16 +232,17 @@ function createProxyHandler(deps: LlmProxyDependencies, provider: ProviderConfig
       const parsed = provider.parseResponseJson(responseJson ?? {});
       await deps.traceRepo.insertBatch([{
         executionId,
-        turnIndex: 0,
+        turnIndex,
         role: "assistant",
         spanType: "llm",
         model: parsed.model ?? model ?? undefined,
         provider: provider.provider,
-        inputContent: rawBody,
+        inputContent,
         outputContent: parsed.outputContent ?? responseText,
         inputTokens: parsed.inputTokens,
         outputTokens: parsed.outputTokens,
         latencyMs: Date.now() - startTime,
+        metadata: { _rawInput: rawBody, _rawOutput: responseText },
       }]);
       await deps.executionRepo.incrementTraceCount(executionId, 1);
 
@@ -293,16 +313,17 @@ function createProxyHandler(deps: LlmProxyDependencies, provider: ProviderConfig
     // Write trace after stream ends
     await deps.traceRepo.insertBatch([{
       executionId,
-      turnIndex: 0,
+      turnIndex,
       role: "assistant",
       spanType: "llm",
       model: streamModel ?? undefined,
       provider: provider.provider,
-      inputContent: rawBody,
+      inputContent,
       outputContent: accumulatedText || undefined,
       inputTokens,
       outputTokens,
       latencyMs: Date.now() - startTime,
+      metadata: { _rawInput: rawBody },
     }]);
     await deps.executionRepo.incrementTraceCount(executionId, 1);
   };

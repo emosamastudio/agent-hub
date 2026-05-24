@@ -1,9 +1,19 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { traces } from "../db/schema.js";
 import type { Db } from "../db/repository.js";
 
 export class TraceRepository {
   constructor(private db: Db) {}
+
+  async getNextTurnIndex(executionId: string): Promise<number> {
+    const result = await this.db.execute(sql`
+      SELECT COALESCE(MAX(turn_index), -1) + 1 as next_turn
+      FROM traces
+      WHERE execution_id = ${executionId}
+    `);
+    const row = result.rows[0] as { next_turn: number } | undefined;
+    return row?.next_turn ?? 0;
+  }
 
   async insertBatch(rows: Array<{
     executionId: string; turnIndex: number; spanIndex?: number;
