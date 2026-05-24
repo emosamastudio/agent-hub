@@ -41,76 +41,17 @@ import {
   type ExecutionQueryOptions,
 } from "./lib/dashboard-helpers";
 import "./App.css";
+import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
-type SocketStatus = "connecting" | "open" | "reconnecting" | "error";
 type StatusTone = "neutral" | "success" | "warning" | "danger" | "info";
-type Page = "overview" | "agents" | "executions" | "detail" | "agent-detail";
-type MisfirePolicy = "fire_once" | "fire_all" | "drop";
 
 interface PageDefinition {
   id: Page;
   label: string;
   description: string;
   badge?: string;
-}
-
-interface Project {
-  id: string;
-  name: string;
-  displayName: string;
-  status?: string;
-}
-
-interface Agent {
-  id: string;
-  projectId: string;
-  name: string;
-  displayName: string;
-  agentType: string;
-  cronExpression: string | null;
-  enabled: boolean;
-  executorStatus: string;
-  activeExecutionCount: number;
-  lastExecutionAt: string | null;
-  lastHeartbeatAt: string | null;
-  archivedAt?: string | null;
-  misfirePolicy?: MisfirePolicy;
-  concurrency?: number;
-  maxPendingQueue?: number;
-  timeoutSeconds?: number;
-  retryMax?: number;
-  retryBackoffBaseMs?: number;
-  handlerName?: string | null;
-  executorHost?: string | null;
-  idempotencyWindowSeconds?: number;
-  maxTurns?: number | null;
-  maxCostUsd?: string | number | null;
-  recentExecutions?: Execution[];
-}
-
-interface SchedulerAgentStatus {
-  id: string;
-  projectId?: string;
-  name: string;
-  displayName?: string;
-  enabled: boolean;
-  executorStatus: string;
-  cronExpression: string | null;
-  queuedCount: number;
-  runningCount: number;
-  pendingCount: number;
-  activeExecutionCount: number;
-  concurrency: number;
-  capacityAvailable: number;
-  maxPendingQueue: number | null;
-  queueAvailable: number | null;
-  dispatchState: string;
-  scheduleState: string;
-  dueRunAt: string | null;
-  nextRunAt: string | null;
-  cronError?: string | null;
 }
 
 interface SchedulerStatusSnapshot {
@@ -121,73 +62,6 @@ interface SchedulerStatusSnapshot {
     traceRetentionDays: number;
   };
   agents: SchedulerAgentStatus[];
-}
-
-interface Execution {
-  id: string;
-  agentId: string;
-  triggerType: string;
-  status: string;
-  triggeredBy: string | null;
-  scheduledAt?: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  durationMs: number | null;
-  resultSummary: string | null;
-  errorMessage: string | null;
-  inputPayload?: Record<string, unknown> | null;
-  traceCountActual: number;
-  progressPercent?: number | null;
-  progressMessage?: string | null;
-  createdAt?: string | null;
-}
-
-interface DashboardStats {
-  agents_total?: number;
-  agentsTotal?: number;
-  agents_online?: number;
-  agentsOnline?: number;
-  recent_failures?: number;
-  recentFailures?: number;
-  recent_success_rate?: string;
-  recentSuccessRate?: string;
-}
-
-interface AlertEntry {
-  id: number;
-  ruleName: string;
-  severity: string;
-  agentId: string | null;
-  agentName: string | null;
-  agentDisplayName: string | null;
-  message: string;
-  context: Record<string, unknown> | null;
-  acknowledgedAt?: string | null;
-  acknowledgedBy?: string | null;
-  createdAt: string | null;
-}
-
-interface TraceSpan {
-  turnIndex?: number;
-  turn_index?: number;
-  spanIndex?: number;
-  span_index?: number;
-  role?: string;
-  spanType?: string;
-  span_type?: string;
-  model?: string | null;
-  latencyMs?: number | null;
-  metadata?: Record<string, unknown> | null;
-  latency_ms?: number | null;
-  inputContent?: string | null;
-  input_content?: string | null;
-  outputContent?: string | null;
-  output_content?: string | null;
-  inputTokens?: number | null;
-  input_tokens?: number | null;
-  outputTokens?: number | null;
-  output_tokens?: number | null;
-  status?: string;
 }
 
 interface TriggerChainEntry {
@@ -232,8 +106,6 @@ interface ExecutionLoadOptions extends ExecutionQueryOptions {
 const EXECUTION_PAGE_SIZE = DEFAULT_EXECUTION_PAGE_SIZE;
 const DEFAULT_TRIGGER_PAYLOAD_TEXT = '{\n  "source": "dashboard"\n}';
 const DASHBOARD_LANGUAGE_STORAGE_KEY = "agent-hub.dashboard.language";
-
-export type DashboardLanguage = "zh" | "en";
 
 const DASHBOARD_TRANSLATIONS = {
   zh: {
