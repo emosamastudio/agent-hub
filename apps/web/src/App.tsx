@@ -52,7 +52,7 @@ import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
 import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
 import { ProjectSelector } from "./components/layout/ProjectSelector.js";
 import "./App.css";
-import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, MisfirePolicy } from "./lib/types.js";
+import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, MisfirePolicy, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
