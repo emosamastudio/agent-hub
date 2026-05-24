@@ -4043,3 +4043,7 @@
 
 /* Trace Raw View */
 .trace-raw-view { background: rgba(15,23,42,0.7); border: 1px solid rgba(73,120,190,0.18); border-radius: 12px; padding: 1rem; }
+
+/* Sparkline chart panel header */
+.panel__header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem 0; }
+.panel__header h3 { font-size: 0.9rem; font-weight: 600; color: #e2e8f0; margin: 0; }

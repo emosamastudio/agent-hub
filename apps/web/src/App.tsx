@@ -23,6 +23,7 @@ import {
   fetchSchedulePreview,
   fetchSchedulerStatus,
   fetchStats,
+  fetchThroughput,
   fetchTriggerChain,
   fetchTraces,
   patchAgent,
@@ -42,6 +43,7 @@ import {
 } from "./lib/dashboard-helpers";
 import { TraceChatView } from "./components/traces/TraceChatView.js";
 import { TraceRawView } from "./components/traces/TraceRawView.js";
+import { Sparkline } from "./components/ui/Sparkline.js";
 import "./App.css";
 import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
@@ -1800,6 +1802,7 @@ export default function App() {
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [alerts, setAlerts] = useState<AlertEntry[]>([]);
   const [stats, setStats] = useState<DashboardStats>({});
+  const [throughputData, setThroughputData] = useState<Array<{ hour: string } & Record<string, number>>>([]);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatusSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1910,6 +1913,7 @@ export default function App() {
         fetchAlerts({ limit: "10" }),
         fetchSchedulerStatus(),
       ]);
+      fetchThroughput(24).then(d => { if (d?.buckets) setThroughputData(d.buckets); }).catch(() => {});
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const executionList = Array.isArray(e) ? e : [];
       setProjects(Array.isArray(p) ? p : []);
@@ -2625,6 +2629,64 @@ export default function App() {
                   tone={recentFailures > 0 ? "danger" : "success"}
                 />
               </div>
+
+              <div className="summary-grid" style={{ marginTop: "0.75rem" }}>
+                <StatCard
+                  label="Success Rate"
+                  value={stats.recentSuccessRate ? `${stats.recentSuccessRate}%` : "—"}
+                  meta="recent executions"
+                  tone={parseFloat(stats.recentSuccessRate ?? "0") > 95 ? "success" : parseFloat(stats.recentSuccessRate ?? "0") > 85 ? "warning" : "danger"}
+                />
+                <StatCard
+                  label="Queue Depth"
+                  value={String(schedulerStatus?.agents?.reduce((sum: number, a: any) => sum + (a.queueDepth ?? 0), 0) ?? "—")}
+                  meta="queued executions"
+                  tone="info"
+                />
+                <StatCard
+                  label="Scheduler"
+                  value={schedulerStatus?.scheduler?.running ? "Active" : "Stopped"}
+                  meta={`${schedulerStatus?.scheduler?.tickCount ?? 0} ticks`}
+                  tone={schedulerStatus?.scheduler?.running ? "success" : "danger"}
+                />
+                <StatCard
+                  label="Active Alerts"
+                  value={String(alerts.filter(a => !a.acknowledgedAt && !(a as any).acknowledged_at).length)}
+                  meta="unacknowledged"
+                  tone={alerts.filter(a => !a.acknowledgedAt && !(a as any).acknowledged_at).length > 0 ? "danger" : "success"}
+                />
+              </div>
+
+              {/* Throughput Chart */}
+              <div className="panel" style={{ marginBottom: "1.5rem" }}>
+                <div className="panel__header">
+                  <h3>Executions (24h)</h3>
+                </div>
+                <div style={{ overflowX: "auto", padding: "0.5rem 0" }}>
+                  <Sparkline data={throughputData} />
+                </div>
+                {/* Legend */}
+                <div style={{ display: "flex", gap: "1rem", fontSize: "0.75rem", color: "#94a3b8", padding: "0 1rem 0.5rem" }}>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#22c55e", marginRight: 4 }} /> Success</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#ef4444", marginRight: 4 }} /> Failed</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#f59e0b", marginRight: 4 }} /> Timeout</span>
+                </div>
+              </div>
+
+              {/* Recent Failures */}
+              {stats.recentFailures && stats.recentFailures > 0 ? (
+                <div className="panel" style={{ marginBottom: "1.5rem" }}>
+                  <div className="panel__header">
+                    <h3 style={{ color: "#fca5a5" }}>Recent Failures</h3>
+                  </div>
+                  <p style={{ fontSize: "0.85rem", color: "#fca5a5", padding: "0 1rem 1rem" }}>
+                    {stats.recentFailures} recent failure{stats.recentFailures !== 1 ? "s" : ""}.{" "}
+                    <a href="#executions" onClick={(e) => { e.preventDefault(); setPage("executions"); }} style={{ color: "#60a5fa" }}>
+                      View all executions →
+                    </a>
+                  </p>
+                </div>
+              ) : null}
 
               <AlertPanel
                 alerts={alerts}
