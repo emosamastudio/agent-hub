@@ -3212,12 +3212,37 @@
   display: inline-block;
 }
 
-.status-dot--tiny {
-  width: 8px;
-  height: 8px;
-  margin-right: 7px;
-  box-shadow: 0 0 8px currentColor;
+.status-dot--queued,
+.status-dot--running {
+  color: #38bdf8;
 }
+
+.status-dot--failed {
+  color: #ff4d5d;
+}
+
+.status-dot--timeout {
+  color: #fbbf24;
+}
+
+.status-dot--cancelled {
+  color: #8ea4c5;
+}
+
+/* Execution Filter Bar */
+.execution-filter-bar { margin-bottom: 1rem; }
+.execution-filter-bar__row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.execution-filter-bar__row select { background: rgba(15,23,42,0.8); color: #e2e8f0; border: 1px solid rgba(73,120,190,0.2); border-radius: 8px; padding: 0.35rem 0.6rem; font-size: 0.82rem; }
+.execution-filter-bar__statuses { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.execution-filter-bar__checkbox { display: flex; align-items: center; gap: 0.2rem; font-size: 0.78rem; color: #94a3b8; cursor: pointer; }
+
+/* Execution Pagination */
+.execution-pagination { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; font-size: 0.82rem; color: #94a3b8; }
+.execution-pagination__controls { display: flex; align-items: center; gap: 0.3rem; }
+.execution-pagination__controls button { background: rgba(15,23,42,0.8); color: #e2e8f0; border: 1px solid rgba(73,120,190,0.2); border-radius: 6px; padding: 0.25rem 0.5rem; font-size: 0.78rem; cursor: pointer; }
+.execution-pagination__controls button.active { background: rgba(59,130,246,0.2); border-color: rgba(59,130,246,0.4); }
+.execution-pagination__controls button:disabled { opacity: 0.4; cursor: default; }
+.execution-pagination__controls select { background: rgba(15,23,42,0.8); color: #e2e8f0; border: 1px solid rgba(73,120,190,0.2); border-radius: 6px; padding: 0.25rem 0.4rem; font-size: 0.78rem; }
 
 .status-value {
   display: inline-flex;

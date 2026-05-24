@@ -167,3 +167,8 @@ export function connectSocket(): WebSocket {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return new WebSocket(`${protocol}//${window.location.host}/ws`);
 }
+
+export async function fetchThroughput(hours = 24): Promise<{ buckets: Array<{ hour: string } & Record<string, number>> }> {
+  const res = await fetch(`${BASE}/api/stats/throughput?hours=${hours}`, { headers: authHeaders() });
+  return res.json();
+}
