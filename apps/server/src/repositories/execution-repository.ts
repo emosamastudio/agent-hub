@@ -115,6 +115,26 @@ export class ExecutionRepository {
     return counts;
   }
 
+  async countByHour(hours: number) {
+    const result = await this.db.execute(sql`
+      SELECT
+        date_trunc('hour', created_at) AS hour,
+        status,
+        COUNT(*)::int AS count
+      FROM executions
+      WHERE created_at > now() - (${hours} || ' hours')::interval
+      GROUP BY hour, status
+      ORDER BY hour
+    `);
+    const buckets = new Map<string, Record<string, number>>();
+    for (const row of result.rows as any[]) {
+      const key = new Date(row.hour).toISOString();
+      if (!buckets.has(key)) buckets.set(key, {});
+      buckets.get(key)![row.status] = row.count;
+    }
+    return Array.from(buckets.entries()).map(([hour, counts]) => ({ hour, ...counts }));
+  }
+
   async claimForDispatch(executionId: string) {
     const result = await this.db.execute(sql`
       WITH target AS (

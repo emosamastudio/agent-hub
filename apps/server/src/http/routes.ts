@@ -1207,6 +1207,13 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     };
   });
 
+  // GET /api/stats/throughput
+  app.get("/api/stats/throughput", async (request, reply) => {
+    const hours = Math.min(Number.parseInt(String((request.query as any).hours ?? "24"), 10) || 24, 168);
+    const buckets = await ctx.executionRepo.countByHour(hours);
+    return { buckets };
+  });
+
   app.get("/api/alerts", async (request, reply) => {
     const parsed = alertsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
