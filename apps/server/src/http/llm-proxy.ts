@@ -52,20 +52,37 @@ function firstHeader(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
-/** Extract the last user message from an OpenAI/Anthropic messages array for trace display */
+/** Extract the most recent meaningful message from the messages array for trace display.
+ *  Handles ReAct loop patterns: user messages, tool results, assistant follow-ups. */
 function extractInputContent(body: Record<string, unknown> | undefined): string | undefined {
   const messages = body?.messages;
-  if (!Array.isArray(messages)) return undefined;
-  // Find the last user message (not system, not tool)
+  if (!Array.isArray(messages) || messages.length === 0) return undefined;
+
+  // Walk backwards to find the last non-system message that adds new information
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as Record<string, unknown> | undefined;
-    if (msg?.role === "user" && typeof msg.content === "string" && msg.content.length > 0) {
+    if (!msg) continue;
+
+    if (msg.role === "user" && typeof msg.content === "string" && msg.content.length > 0) {
       return msg.content;
     }
+    if (msg.role === "tool") {
+      const name = typeof msg.name === "string" ? msg.name : (typeof msg.tool_call_id === "string" ? msg.tool_call_id.slice(0, 20) : "tool");
+      const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
+      const summary = contentStr.length > 200 ? contentStr.slice(0, 200) + "…" : contentStr;
+      return `[${name}] ${summary}`;
+    }
+    if (msg.role === "assistant" && typeof msg.content === "string" && msg.content.length > 0) {
+      // Assistant with text (previous turn summary context — less preferred, keep walking)
+      continue;
+    }
   }
-  // Fallback: last message of any role
+
+  // Fallback: any non-system message with string content
   const last = messages[messages.length - 1] as Record<string, unknown> | undefined;
-  if (last && typeof last.content === "string") return last.content;
+  if (last && typeof last.content === "string" && last.content.length > 0) {
+    return last.content;
+  }
   return undefined;
 }
 
@@ -121,10 +138,21 @@ function openaiProvider(deps: LlmProxyDependencies): ProviderConfig {
     provider: "openai",
     parseResponseJson(json: any) {
       const choices = Array.isArray(json?.choices) ? json.choices : [];
-      const content = choices[0]?.message?.content ?? JSON.stringify(json);
+      const message = choices[0]?.message;
+      const textContent = message?.content;
+      const toolCalls = message?.tool_calls;
+      let outputContent: string;
+      if (typeof textContent === "string" && textContent.length > 0) {
+        outputContent = textContent;
+      } else if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        const names = toolCalls.map((tc: any) => tc?.function?.name ?? "call").join(", ");
+        outputContent = `[调用工具: ${names}]`;
+      } else {
+        outputContent = JSON.stringify(json);
+      }
       return {
         model: json?.model,
-        outputContent: content,
+        outputContent,
         inputTokens: json?.usage?.prompt_tokens,
         outputTokens: json?.usage?.completion_tokens,
       };
