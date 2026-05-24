@@ -1,4 +1,4 @@
-CREATE TABLE "proxy_tokens" (
+CREATE TABLE IF NOT EXISTS "proxy_tokens" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "execution_id" uuid NOT NULL,
   "token_hash" text NOT NULL,
