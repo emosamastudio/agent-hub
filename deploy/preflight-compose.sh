@@ -211,6 +211,8 @@ if [[ -f "$env_file" ]]; then
   require_secret AGENT_HUB_POSTGRES_PASSWORD
   require_secret AGENT_HUB_DASHBOARD_PASSWORD
   require_secret AGENT_HUB_DEFAULT_API_KEY
+	  require_secret AGENT_HUB_ANTHROPIC_API_KEY
+	  check_env_value AGENT_HUB_ANTHROPIC_ENDPOINT "https://api.anthropic.com"
 fi
 
 check_docker

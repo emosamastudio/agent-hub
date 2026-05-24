@@ -197,6 +197,11 @@ compose up -d --build
 wait_for_ready
 compose ps
 
+# Post-deploy verification
+if [[ -x "${script_dir}/deploy-verify.sh" ]]; then
+  "${script_dir}/deploy-verify.sh" --env-file "$env_file" --port "$port" --check-journal || true
+fi
+
 if ! run_release_check; then
   printf 'Agent Hub release check failed after deployment\n' >&2
   show_agent_hub_logs
