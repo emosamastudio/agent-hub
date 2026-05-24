@@ -60,6 +60,8 @@ export function createServerConfig(env: Env = process.env) {
     proxyTokenExpirySeconds: parsePositiveInt(env.AGENT_HUB_PROXY_TOKEN_EXPIRY_SECONDS, 600),
     anthropicApiKey: env.AGENT_HUB_ANTHROPIC_API_KEY ?? "",
     anthropicEndpoint: env.AGENT_HUB_ANTHROPIC_ENDPOINT ?? "https://api.anthropic.com",
+    openaiApiKey: env.AGENT_HUB_OPENAI_API_KEY ?? env.AGENT_HUB_ANTHROPIC_API_KEY ?? "",
+    openaiEndpoint: env.AGENT_HUB_OPENAI_ENDPOINT ?? env.AGENT_HUB_ANTHROPIC_ENDPOINT ?? "https://api.openai.com",
     encryptionKey: env.AGENT_HUB_ENCRYPTION_KEY ?? "",
     bootstrapDefaultProject,
     seedDemoAgent,

@@ -4,25 +4,141 @@ import type { ProxyTokenRepository } from "../repositories/proxy-token-repositor
 import type { TraceRepository } from "../repositories/trace-repository.js";
 import type { ExecutionRepository } from "../repositories/execution-repository.js";
 
+// ── Types ──
+
 export interface LlmProxyDependencies {
   proxyTokenRepo: ProxyTokenRepository;
   traceRepo: TraceRepository;
   executionRepo: ExecutionRepository;
   anthropicApiKey: string;
   anthropicEndpoint: string;
+  openaiApiKey: string;
+  openaiEndpoint: string;
 }
+
+interface ProviderConfig {
+  /** Path appended to endpoint, e.g. "/v1/messages" or "/v1/chat/completions" */
+  upstreamPath: string;
+  /** Header name to extract the proxy token from the agent request */
+  tokenHeader: string;
+  /** How the upstream expects auth: "anthropic" uses x-api-key, "openai" uses Authorization: Bearer */
+  authStyle: "anthropic" | "openai";
+  /** The real API key to forward to the upstream */
+  apiKey: string;
+  /** The upstream base URL */
+  endpoint: string;
+  /** Provider name written to traces */
+  provider: string;
+  /** Extract model, content, and token usage from a non-streaming JSON response */
+  parseResponseJson: (json: any) => {
+    model?: string;
+    outputContent?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+  };
+  /** Parse one SSE data event for streaming accumulation */
+  parseStreamEvent: (event: any) => {
+    textDelta?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    model?: string;
+  };
+}
+
+// ── Helpers ──
 
 function firstHeader(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
 }
 
-export function createLlmProxyHandler(deps: LlmProxyDependencies) {
-  return async function llmProxyHandler(request: FastifyRequest, reply: FastifyReply) {
+// ── Provider configs ──
+
+function anthropicProvider(deps: LlmProxyDependencies): ProviderConfig {
+  return {
+    upstreamPath: "/v1/messages",
+    tokenHeader: "x-api-key",
+    authStyle: "anthropic",
+    apiKey: deps.anthropicApiKey,
+    endpoint: deps.anthropicEndpoint,
+    provider: "anthropic",
+    parseResponseJson(json: any) {
+      const content = json?.content;
+      const textBlocks = Array.isArray(content)
+        ? content.filter((b: any) => b?.type === "text").map((b: any) => b.text)
+        : [];
+      return {
+        model: json?.model,
+        outputContent: textBlocks.length > 0 ? textBlocks.join("") : JSON.stringify(json),
+        inputTokens: json?.usage?.input_tokens,
+        outputTokens: json?.usage?.output_tokens,
+      };
+    },
+    parseStreamEvent(event: any) {
+      switch (event.type) {
+        case "message_start":
+          return {
+            model: event.message?.model,
+            inputTokens: event.message?.usage?.input_tokens,
+          };
+        case "content_block_delta":
+          if (event.delta?.type === "text_delta") return { textDelta: event.delta.text };
+          if (event.delta?.type === "input_json_delta") return { textDelta: event.delta.partial_json };
+          return {};
+        case "message_delta":
+          return { outputTokens: event.usage?.output_tokens };
+        default:
+          return {};
+      }
+    },
+  };
+}
+
+function openaiProvider(deps: LlmProxyDependencies): ProviderConfig {
+  return {
+    upstreamPath: "/v1/chat/completions",
+    tokenHeader: "authorization",
+    authStyle: "openai",
+    apiKey: deps.openaiApiKey || deps.anthropicApiKey,
+    endpoint: deps.openaiEndpoint || deps.anthropicEndpoint,
+    provider: "openai",
+    parseResponseJson(json: any) {
+      const choices = Array.isArray(json?.choices) ? json.choices : [];
+      const content = choices[0]?.message?.content ?? JSON.stringify(json);
+      return {
+        model: json?.model,
+        outputContent: content,
+        inputTokens: json?.usage?.prompt_tokens,
+        outputTokens: json?.usage?.completion_tokens,
+      };
+    },
+    parseStreamEvent(event: any) {
+      const choices = Array.isArray(event?.choices) ? event.choices : [];
+      const delta = choices[0]?.delta;
+      return {
+        textDelta: delta?.content ?? undefined,
+        model: event?.model,
+      };
+    },
+  };
+}
+
+// ── Core proxy handler factory ──
+
+function createProxyHandler(deps: LlmProxyDependencies, provider: ProviderConfig) {
+  return async function proxyHandler(request: FastifyRequest, reply: FastifyReply) {
     const startTime = Date.now();
 
     // 1. Extract proxy token
-    const rawToken = firstHeader(request.headers["x-api-key"]);
+    let rawToken: string | null = null;
+    if (provider.tokenHeader === "authorization") {
+      const auth = firstHeader(request.headers.authorization);
+      if (auth?.startsWith("Bearer ")) {
+        rawToken = auth.slice("Bearer ".length);
+      }
+    } else {
+      rawToken = firstHeader(request.headers[provider.tokenHeader as keyof typeof request.headers] as string | string[] | undefined);
+    }
     if (!rawToken) {
       return reply.status(401).send({ error: "proxy token required" });
     }
@@ -35,8 +151,8 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
     }
 
     // 3. Check provider key
-    if (!deps.anthropicApiKey) {
-      return reply.status(502).send({ error: "no upstream API key configured" });
+    if (!provider.apiKey) {
+      return reply.status(502).send({ error: `no upstream API key configured for ${provider.provider}` });
     }
 
     const executionId = tokenRow.executionId;
@@ -44,29 +160,32 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
     // 4. Reconstruct raw body
     const rawBody = JSON.stringify(request.body);
 
-    // 5. Extract model name for trace
+    // 5. Extract model name
     const body = request.body as Record<string, unknown> | undefined;
     const model = typeof body?.model === "string" ? body.model : null;
     const isStreaming = body?.stream === true;
 
-    // 6. Forward to Anthropic
+    // 6. Build upstream headers
+    const upstreamHeaders: Record<string, string> = { "content-type": "application/json" };
+    if (provider.authStyle === "anthropic") {
+      upstreamHeaders["x-api-key"] = provider.apiKey;
+    } else {
+      upstreamHeaders["authorization"] = `Bearer ${provider.apiKey}`;
+    }
+
+    // 7. Forward to provider
     let upstreamResp: Response;
     try {
-      upstreamResp = await fetch(`${deps.anthropicEndpoint}/v1/messages`, {
+      upstreamResp = await fetch(`${provider.endpoint}${provider.upstreamPath}`, {
         method: "POST",
-        headers: {
-          "x-api-key": deps.anthropicApiKey,
-          "anthropic-version": firstHeader(request.headers["anthropic-version"]) ?? "2023-06-01",
-          "anthropic-beta": firstHeader(request.headers["anthropic-beta"]) ?? undefined,
-          "content-type": "application/json",
-        } as Record<string, string>,
+        headers: upstreamHeaders,
         body: rawBody,
       });
-    } catch (err) {
+    } catch {
       return reply.status(502).send({ error: "upstream unreachable" });
     }
 
-    // 7. Provider error — relay + trace
+    // 8. Provider error — relay + trace
     if (!upstreamResp.ok) {
       const errorBody = await upstreamResp.text().catch(() => "");
       await deps.traceRepo.insertBatch([{
@@ -75,7 +194,7 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
         role: "system",
         spanType: "llm",
         model: model ?? undefined,
-        provider: "anthropic",
+        provider: provider.provider,
         inputContent: rawBody,
         outputContent: errorBody,
         latencyMs: Date.now() - startTime,
@@ -85,27 +204,24 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
       return reply.status(upstreamResp.status).send(errorBody);
     }
 
-    // 8. Non-streaming path
+    // 9. Non-streaming path
     if (!isStreaming) {
       const responseText = await upstreamResp.text();
       let responseJson: any = null;
       try { responseJson = JSON.parse(responseText); } catch { /* not JSON */ }
 
-      const outputContent = responseText;
-      const inputTokens = responseJson?.usage?.input_tokens ?? undefined;
-      const outputTokens = responseJson?.usage?.output_tokens ?? undefined;
-
+      const parsed = provider.parseResponseJson(responseJson ?? {});
       await deps.traceRepo.insertBatch([{
         executionId,
         turnIndex: 0,
         role: "assistant",
         spanType: "llm",
-        model: responseJson?.model ?? model ?? undefined,
-        provider: "anthropic",
+        model: parsed.model ?? model ?? undefined,
+        provider: provider.provider,
         inputContent: rawBody,
-        outputContent,
-        inputTokens,
-        outputTokens,
+        outputContent: parsed.outputContent ?? responseText,
+        inputTokens: parsed.inputTokens,
+        outputTokens: parsed.outputTokens,
         latencyMs: Date.now() - startTime,
       }]);
       await deps.executionRepo.incrementTraceCount(executionId, 1);
@@ -115,7 +231,7 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
         .send(responseText);
     }
 
-    // 9. Streaming path
+    // 10. Streaming path
     const reader = upstreamResp.body?.getReader();
     if (!reader) {
       return reply.status(502).send({ error: "upstream returned no body" });
@@ -141,17 +257,16 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        // Relay raw bytes to agent
         reply.raw.write(value);
 
-        // Parse SSE for accumulation
         const chunk = decoder.decode(value, { stream: true });
         lineBuffer += chunk;
 
         while (lineBuffer.includes("\n")) {
           const newlineIdx = lineBuffer.indexOf("\n");
-          const line = lineBuffer.slice(0, newlineIdx).replace(/\r$/, "");
+          let line = lineBuffer.slice(0, newlineIdx);
           lineBuffer = lineBuffer.slice(newlineIdx + 1);
+          line = line.replace(/\r$/, "");
 
           if (!line.startsWith("data: ")) continue;
           const jsonStr = line.slice(6);
@@ -159,32 +274,11 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
 
           try {
             const event = JSON.parse(jsonStr);
-
-            switch (event.type) {
-              case "message_start":
-                if (event.message?.model) streamModel = event.message.model;
-                if (event.message?.usage) {
-                  inputTokens = event.message.usage.input_tokens ?? inputTokens;
-                }
-                break;
-
-              case "content_block_delta":
-                if (event.delta?.type === "text_delta" && event.delta.text) {
-                  accumulatedText += event.delta.text;
-                } else if (event.delta?.type === "input_json_delta" && event.delta.partial_json) {
-                  accumulatedText += event.delta.partial_json;
-                }
-                break;
-
-              case "message_delta":
-                if (event.usage) {
-                  outputTokens = event.usage.output_tokens ?? outputTokens;
-                }
-                if (event.delta?.stop_reason) {
-                  // stream is ending
-                }
-                break;
-            }
+            const parsed = provider.parseStreamEvent(event);
+            if (parsed.textDelta) accumulatedText += parsed.textDelta;
+            if (parsed.model) streamModel = parsed.model;
+            if (parsed.inputTokens != null) inputTokens = parsed.inputTokens;
+            if (parsed.outputTokens != null) outputTokens = parsed.outputTokens;
           } catch {
             // ignore unparseable SSE events
           }
@@ -196,14 +290,14 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
       reply.raw.end();
     }
 
-    // 10. Write trace after stream ends
+    // Write trace after stream ends
     await deps.traceRepo.insertBatch([{
       executionId,
       turnIndex: 0,
       role: "assistant",
       spanType: "llm",
       model: streamModel ?? undefined,
-      provider: "anthropic",
+      provider: provider.provider,
       inputContent: rawBody,
       outputContent: accumulatedText || undefined,
       inputTokens,
@@ -212,4 +306,19 @@ export function createLlmProxyHandler(deps: LlmProxyDependencies) {
     }]);
     await deps.executionRepo.incrementTraceCount(executionId, 1);
   };
+}
+
+// ── Public factory functions ──
+
+export function createAnthropicProxyHandler(deps: LlmProxyDependencies) {
+  return createProxyHandler(deps, anthropicProvider(deps));
+}
+
+export function createOpenAiProxyHandler(deps: LlmProxyDependencies) {
+  return createProxyHandler(deps, openaiProvider(deps));
+}
+
+/** Backward-compatible alias */
+export function createLlmProxyHandler(deps: LlmProxyDependencies) {
+  return createAnthropicProxyHandler(deps);
 }

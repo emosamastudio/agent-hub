@@ -8,7 +8,7 @@ import { Cron } from "croner";
 import { getBearerToken, isValidDashboardBasicAuth } from "../middleware/auth.js";
 import { hashApiKey } from "../security.js";
 import { getSchedulerRuntimeStats } from "../services/scheduler.js";
-import { createLlmProxyHandler } from "./llm-proxy.js";
+import { createAnthropicProxyHandler, createOpenAiProxyHandler } from "./llm-proxy.js";
 
 interface ExtendedAppContext extends AppContext {}
 
@@ -1249,11 +1249,16 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
   });
 
   // ── LLM Proxy ──
-  app.post("/v1/messages", createLlmProxyHandler({
+  const proxyDeps = {
     proxyTokenRepo: ctx.proxyTokenRepo,
     traceRepo: ctx.traceRepo,
     executionRepo: ctx.executionRepo,
     anthropicApiKey: serverConfig.anthropicApiKey,
     anthropicEndpoint: serverConfig.anthropicEndpoint,
-  }));
+    openaiApiKey: serverConfig.openaiApiKey,
+    openaiEndpoint: serverConfig.openaiEndpoint,
+  };
+
+  app.post("/v1/messages", createAnthropicProxyHandler(proxyDeps));
+  app.post("/v1/chat/completions", createOpenAiProxyHandler(proxyDeps));
 }
