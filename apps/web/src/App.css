@@ -4083,3 +4083,44 @@
 .project-selector__item.active { background: rgba(59,130,246,0.12); color: #60a5fa; }
 .project-selector__item-name { }
 .project-selector__item-count { font-size: 0.72rem; color: #64748b; }
+
+/* Alert Filter Bar */
+.alert-filter-bar { margin-bottom: 1rem; }
+.alert-filter-bar__row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.alert-filter-bar__segments { display: flex; gap: 0; border: 1px solid rgba(73,120,190,0.2); border-radius: 8px; overflow: hidden; }
+.alert-filter-bar__seg { padding: 0.25rem 0.6rem; font-size: 0.78rem; background: transparent; color: #94a3b8; border: none; cursor: pointer; }
+.alert-filter-bar__seg.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.alert-filter-bar__seg:not(:last-child) { border-right: 1px solid rgba(73,120,190,0.15); }
+
+/* Alert Detail Panel */
+.alert-detail-panel { padding: 1rem; }
+.alert-detail-panel__header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid rgba(73,120,190,0.15); }
+.alert-detail-panel__rule { font-weight: 600; font-size: 0.9rem; }
+.alert-detail-panel__body { display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.85rem; color: #94a3b8; }
+.alert-detail-panel__field strong { display: block; color: #e2e8f0; font-size: 0.78rem; margin-bottom: 0.2rem; }
+.alert-detail-panel__field p { margin: 0; }
+.alert-detail-panel__actions { padding-top: 0.5rem; }
+
+/* Alerts Page */
+.badge { display: inline-flex; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; }
+.badge--danger { background: rgba(239,68,68,0.15); color: #fca5a5; }
+
+/* Scheduler Health Grid */
+.scheduler-health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; padding: 0.75rem 1rem; }
+.scheduler-health-card { background: rgba(15,23,42,0.5); border: 1px solid rgba(73,120,190,0.15); border-radius: 8px; padding: 0.6rem; text-align: center; }
+.scheduler-health-card__label { display: block; font-size: 0.72rem; color: #64748b; margin-bottom: 0.2rem; }
+.scheduler-health-card__value { display: block; font-size: 1.1rem; font-weight: 700; color: #e2e8f0; }
+
+/* Cron Overview */
+.cron-overview-list { }
+.cron-agent-row { border-bottom: 1px solid rgba(73,120,190,0.1); }
+.cron-agent-row:last-child { border-bottom: none; }
+.cron-agent-row__header { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; cursor: pointer; font-size: 0.85rem; }
+.cron-agent-row__header:hover { background: rgba(255,255,255,0.02); }
+.cron-agent-row__toggle { font-size: 0.65rem; width: 16px; }
+.cron-agent-row__name { flex: 0 0 180px; }
+.cron-agent-row__expr { font-size: 0.78rem; background: rgba(15,23,42,0.6); padding: 0.15rem 0.5rem; border-radius: 4px; color: #60a5fa; }
+.cron-agent-row__next { margin-left: auto; }
+.cron-agent-row__body { padding: 0.5rem 2.5rem 1rem; }
+.cron-agent-row__detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.4rem; font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.5rem; }
+.cron-agent-row__preview { font-size: 0.82rem; color: #94a3b8; }

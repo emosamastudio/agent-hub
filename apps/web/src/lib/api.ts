@@ -172,3 +172,8 @@ export async function fetchThroughput(hours = 24): Promise<{ buckets: Array<{ ho
   const res = await fetch(`${BASE}/api/stats/throughput?hours=${hours}`, { headers: authHeaders() });
   return res.json();
 }
+
+export async function fetchMetrics(): Promise<{ scheduler?: Record<string, unknown> }> {
+  const res = await fetch(`${BASE}/api/metrics`, { headers: authHeaders() });
+  return res.json();
+}

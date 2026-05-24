@@ -22,6 +22,7 @@ import {
   fetchProjects,
   fetchSchedulePreview,
   fetchSchedulerStatus,
+  fetchMetrics,
   fetchStats,
   fetchThroughput,
   fetchTriggerChain,
@@ -31,6 +32,8 @@ import {
   triggerAgent,
   connectSocket,
 } from "./lib/api";
+import { AlertsPage } from "./pages/AlertsPage.js";
+import { SchedulerPage } from "./pages/SchedulerPage.js";
 import {
   DEFAULT_EXECUTION_PAGE_SIZE,
   agentSettingsPatchFromForm,
@@ -49,7 +52,7 @@ import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
 import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
 import { ProjectSelector } from "./components/layout/ProjectSelector.js";
 import "./App.css";
-import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
+import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
@@ -483,6 +486,7 @@ function hasExecutionFilters(values: ExecutionFilterValues): boolean {
 
 type IconName =
   | "arrow-left"
+  | "bell"
   | "cancel"
   | "cube"
   | "execution"
@@ -511,6 +515,12 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
         <svg {...common}>
           <path d="M15 18l-6-6 6-6" />
           <path d="M10 12h10" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M13.7 19a2 2 0 01-3.4 0M18 8a6 6 0 00-5-5.9V2a1 1 0 10-2 0v.1A6 6 0 006 8c0 3.5-1.2 5.6-2 6.7-.3.5-.5.8-.5 1.1 0 .7.5 1.2 1.2 1.2h14.6c.7 0 1.2-.5 1.2-1.2 0-.3-.2-.6-.5-1.1-.8-1.1-2-3.2-2-6.7z" />
         </svg>
       );
     case "cancel":
@@ -619,6 +629,10 @@ function navIcon(page: Page): IconName {
     case "detail":
     case "agent-detail":
       return "execution";
+    case "alerts":
+      return "bell";
+    case "scheduler":
+      return "timer";
   }
 }
 
@@ -1844,6 +1858,8 @@ export default function App() {
       "executions",
       "detail",
       "agent-detail",
+      "alerts",
+      "scheduler",
     ];
     return valid.includes(hash as Page) ? (hash as Page) : "overview";
   });
@@ -1858,6 +1874,7 @@ export default function App() {
   const [stats, setStats] = useState<DashboardStats>({});
   const [throughputData, setThroughputData] = useState<Array<{ hour: string } & Record<string, number>>>([]);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatusSnapshot | null>(null);
+  const [schedulerRuntimeStats, setSchedulerRuntimeStats] = useState<SchedulerRuntimeStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -1923,6 +1940,8 @@ export default function App() {
         "executions",
         "detail",
         "agent-detail",
+        "alerts",
+        "scheduler",
       ];
       if (valid.includes(hash as Page)) setPage(hash as Page);
     };
@@ -1966,7 +1985,7 @@ export default function App() {
         : { limit: String(executionLimit) };
       const archivedParams: Record<string, string> = { archived: "only" };
       if (projectScope) archivedParams.project = projectScope;
-      const [p, a, archived, e, s, al, scheduler] = await Promise.all([
+      const [p, a, archived, e, s, al, scheduler, metrics] = await Promise.all([
         fetchProjects(),
         fetchAgents(agentParams),
         fetchAgents(archivedParams),
@@ -1974,6 +1993,7 @@ export default function App() {
         fetchStats(),
         fetchAlerts({ limit: "10" }),
         fetchSchedulerStatus(),
+        fetchMetrics(),
       ]);
       fetchThroughput(24).then(d => { if (d?.buckets) setThroughputData(d.buckets); }).catch(() => {});
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
@@ -1988,6 +2008,11 @@ export default function App() {
       setSchedulerStatus(
         scheduler && Array.isArray((scheduler as SchedulerStatusSnapshot).agents)
           ? (scheduler as SchedulerStatusSnapshot)
+          : null,
+      );
+      setSchedulerRuntimeStats(
+        metrics && (metrics as any).scheduler
+          ? (metrics as any).scheduler as SchedulerRuntimeStats
           : null,
       );
       setLastSyncedAt(new Date().toISOString());
@@ -2537,6 +2562,18 @@ export default function App() {
         label: t("nav.executions"),
         description: t("nav.executionsDescription"),
         badge: String(executions.length),
+      },
+      {
+        id: "alerts",
+        label: t("nav.alerts"),
+        description: t("nav.alertsDescription"),
+        badge: String(alerts.filter((a: AlertEntry) => !(a.acknowledgedAt ?? a.acknowledged_at)).length),
+      },
+      {
+        id: "scheduler",
+        label: t("nav.scheduler"),
+        description: t("nav.schedulerDescription"),
+        badge: String(schedulerStatus?.agents?.length ?? 0),
       },
       ...(backPage ? [backPage] : []),
     ];
@@ -3299,6 +3336,16 @@ export default function App() {
                 />
               </div>
             </>
+          )}
+
+          {/* ALERTS */}
+          {!loading && page === "alerts" && (
+            <AlertsPage alerts={alerts} onRefresh={() => loadData(true)} />
+          )}
+
+          {/* SCHEDULER */}
+          {!loading && page === "scheduler" && (
+            <SchedulerPage schedulerStatus={schedulerStatus} schedulerRuntimeStats={schedulerRuntimeStats} />
           )}
         </main>
       </div>

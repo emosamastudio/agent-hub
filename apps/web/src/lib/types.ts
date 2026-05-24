@@ -1,6 +1,6 @@
 // apps/web/src/lib/types.ts
 
-export type Page = "overview" | "agents" | "executions" | "detail" | "agent-detail";
+export type Page = "overview" | "agents" | "executions" | "detail" | "agent-detail" | "alerts" | "scheduler";
 
 export type DashboardLanguage = "zh" | "en";
 
