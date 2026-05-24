@@ -4047,3 +4047,25 @@
 /* Sparkline chart panel header */
 .panel__header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem 0; }
 .panel__header h3 { font-size: 0.9rem; font-weight: 600; color: #e2e8f0; margin: 0; }
+
+/* Toggle Switch */
+.toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.toggle--disabled { opacity: 0.4; cursor: default; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle__slider { position: absolute; inset: 0; background: rgba(148,163,184,0.3); border-radius: 20px; transition: 0.2s; }
+.toggle__slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; bottom: 2px; background: white; border-radius: 50%; transition: 0.2s; }
+.toggle input:checked + .toggle__slider { background: #22c55e; }
+.toggle input:checked + .toggle__slider::before { transform: translateX(16px); }
+
+/* Agent Filter Bar */
+.agent-filter-bar { margin-bottom: 1rem; }
+.agent-filter-bar__row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.agent-filter-bar__search { background: rgba(15,23,42,0.8); color: #e2e8f0; border: 1px solid rgba(73,120,190,0.2); border-radius: 8px; padding: 0.35rem 0.6rem; font-size: 0.82rem; min-width: 180px; }
+.agent-filter-bar__row select { background: rgba(15,23,42,0.8); color: #e2e8f0; border: 1px solid rgba(73,120,190,0.2); border-radius: 8px; padding: 0.35rem 0.6rem; font-size: 0.82rem; }
+.agent-filter-bar__segments { display: flex; gap: 0; border: 1px solid rgba(73,120,190,0.2); border-radius: 8px; overflow: hidden; }
+.agent-filter-bar__seg { padding: 0.25rem 0.6rem; font-size: 0.78rem; background: transparent; color: #94a3b8; border: none; cursor: pointer; }
+.agent-filter-bar__seg.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.agent-filter-bar__seg:not(:last-child) { border-right: 1px solid rgba(73,120,190,0.15); }
+
+/* Agent Bulk Toolbar */
+.agent-bulk-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; margin-bottom: 0.75rem; font-size: 0.85rem; }

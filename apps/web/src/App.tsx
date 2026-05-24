@@ -44,6 +44,9 @@ import {
 import { TraceChatView } from "./components/traces/TraceChatView.js";
 import { TraceRawView } from "./components/traces/TraceRawView.js";
 import { Sparkline } from "./components/ui/Sparkline.js";
+import { Toggle } from "./components/ui/Toggle.js";
+import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
+import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
 import "./App.css";
 import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
@@ -1154,6 +1157,9 @@ export function AgentDirectoryPanel({
   actions,
   children,
   showLifecycleActions = true,
+  showCheckbox = false,
+  selectedAgentIds = [],
+  onSelectionChange,
   deleteBusyAgentId = null,
   drainBusyAgentId = null,
   onOpenAgent,
@@ -1173,6 +1179,9 @@ export function AgentDirectoryPanel({
   actions?: ReactNode;
   children?: ReactNode;
   showLifecycleActions?: boolean;
+  showCheckbox?: boolean;
+  selectedAgentIds?: string[];
+  onSelectionChange?: (agentId: string, selected: boolean) => void;
   deleteBusyAgentId?: string | null;
   drainBusyAgentId?: string | null;
   onOpenAgent: (agent: Agent) => void;
@@ -1209,6 +1218,7 @@ export function AgentDirectoryPanel({
             <table className="runs-table">
               <thead>
                 <tr>
+                  {showCheckbox ? <th style={{ width: 32 }} /> : null}
                   <th>{t("table.project")}</th>
                   <th>{t("table.agent")}</th>
                   <th>{t("table.cron")}</th>
@@ -1236,6 +1246,19 @@ export function AgentDirectoryPanel({
                     onClick={() => onOpenAgent(agent)}
                     style={{ cursor: "pointer" }}
                   >
+                    {showCheckbox ? (
+                      <td onClick={(e) => e.stopPropagation()} style={{ width: 32 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedAgentIds.includes(agent.id)}
+                          onChange={(e) => {
+                            if (onSelectionChange) {
+                              onSelectionChange(agent.id, e.target.checked);
+                            }
+                          }}
+                        />
+                      </td>
+                    ) : null}
                     <td>
                       {agent.projectId
                         ? projectDisplayName(projects, agent.projectId)
@@ -1250,9 +1273,29 @@ export function AgentDirectoryPanel({
                       <code>{agent.cronExpression || t("table.manual")}</code>
                     </td>
                     <td>
-                      <StatusPill tone={agentStatusTone(agent)}>
-                        {agentStatusLabel(agent)}
-                      </StatusPill>
+                      {(() => {
+                        const lastHb = agent.lastHeartbeatAt ? new Date(agent.lastHeartbeatAt) : null;
+                        const ageSec = lastHb ? (Date.now() - lastHb.getTime()) / 1000 : Infinity;
+                        let healthLabel: string;
+                        let healthTone: StatusTone;
+                        if (agent.archivedAt) {
+                          healthLabel = "Archived";
+                          healthTone = "neutral";
+                        } else if (!agent.enabled) {
+                          healthLabel = "Disabled";
+                          healthTone = "neutral";
+                        } else if (ageSec < 30) {
+                          healthLabel = `Online · ${Math.round(ageSec)}s ago`;
+                          healthTone = "success";
+                        } else if (ageSec < 60) {
+                          healthLabel = `Degraded · ${Math.round(ageSec)}s ago`;
+                          healthTone = "warning";
+                        } else {
+                          healthLabel = "Offline";
+                          healthTone = "danger";
+                        }
+                        return <StatusPill tone={healthTone}>{healthLabel}</StatusPill>;
+                      })()}
                     </td>
                     {showSchedulerDiagnostics ? (
                       <>
@@ -1288,18 +1331,16 @@ export function AgentDirectoryPanel({
                         ))}
                     </td>
                     {showLifecycleActions ? (
-                      <td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <div className="action-group">
-                          <button
-                            className="ghost-button ghost-button--compact"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onToggleAgent(agent.id, !agent.enabled);
+                          <Toggle
+                            checked={agent.enabled}
+                            onChange={(checked) => {
+                              onToggleAgent(agent.id, checked);
                             }}
-                          >
-                            {agent.enabled ? t("actions.disable") : t("actions.enable")}
-                          </button>
+                            disabled={!!agent.archivedAt}
+                            label={agent.enabled ? t("actions.disable") : t("actions.enable")}
+                          />
                           <button
                             className="action-button action-button--resume"
                             type="button"
@@ -1835,6 +1876,8 @@ export default function App() {
   const [triggerBusyAgentId, setTriggerBusyAgentId] = useState<string | null>(null);
   const [deleteBusyAgentId, setDeleteBusyAgentId] = useState<string | null>(null);
   const [drainBusyAgentId, setDrainBusyAgentId] = useState<string | null>(null);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  const [agentFilters, setAgentFilters] = useState<Record<string, string>>({});
   const [agentSettingsForm, setAgentSettingsForm] = useState<AgentSettingsFormValues>(() => initialAgentSettingsForm());
   const [agentSettingsBusy, setAgentSettingsBusy] = useState(false);
   const [agentSettingsError, setAgentSettingsError] = useState<string | null>(null);
@@ -2717,6 +2760,42 @@ export default function App() {
           {/* ═══ AGENTS ═══ */}
           {!loading && page === "agents" && (
             <>
+              <AgentFilterBar
+                projects={projects}
+                search={agentFilters.search || ""}
+                projectId={agentFilters.projectId || ""}
+                agentType={agentFilters.agentType || ""}
+                status={agentFilters.status || ""}
+                schedule={agentFilters.schedule || ""}
+                onChange={(patch) => setAgentFilters((prev) => ({ ...prev, ...patch }))}
+              />
+              <AgentBulkToolbar
+                selectedIds={selectedAgentIds}
+                onEnable={async () => {
+                  for (const id of selectedAgentIds) {
+                    await patchAgent(id, { enabled: true });
+                  }
+                  setSelectedAgentIds([]);
+                  loadData(true);
+                }}
+                onDisable={async () => {
+                  for (const id of selectedAgentIds) {
+                    await patchAgent(id, { enabled: false });
+                  }
+                  setSelectedAgentIds([]);
+                  loadData(true);
+                }}
+                onDrain={async () => {
+                  const confirmed = window.confirm(`Drain ${selectedAgentIds.length} agent(s)? This will clear their queues.`);
+                  if (!confirmed) return;
+                  for (const id of selectedAgentIds) {
+                    try { await drainAgent(id, { cancelRunning: false }); } catch { /* continue */ }
+                  }
+                  setSelectedAgentIds([]);
+                  loadData(true);
+                }}
+                onClearSelection={() => setSelectedAgentIds([])}
+              />
               <AgentDirectoryPanel
                 agents={agents}
                 projects={projects}
@@ -2726,6 +2805,15 @@ export default function App() {
                 description={t("agentDirectory.agentsDescription")}
                 emptyTitle={t("agentDirectory.emptyTitle")}
                 emptyDescription={t("agentDirectory.emptyDescription")}
+                showCheckbox
+                selectedAgentIds={selectedAgentIds}
+                onSelectionChange={(agentId, selected) => {
+                  if (selected) {
+                    setSelectedAgentIds((prev) => [...prev, agentId]);
+                  } else {
+                    setSelectedAgentIds((prev) => prev.filter((id) => id !== agentId));
+                  }
+                }}
                 actions={
                   <button
                     className="action-button action-button--resume"
