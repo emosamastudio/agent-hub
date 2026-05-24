@@ -1899,7 +1899,7 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [schedulePreview, setSchedulePreview] = useState<string[]>([]);
   const [schedulePreviewLoading, setSchedulePreviewLoading] = useState(false);
-  const [traceViewMode, setTraceViewMode] = useState<"chat" | "raw">("chat");
+  const [traceViewMode, _setTraceViewMode] = useState<"chat" | "raw">("chat");
   const [actionBusyExecutionId, setActionBusyExecutionId] = useState<string | null>(null);
   const [triggerPayloadText, setTriggerPayloadText] = useState(DEFAULT_TRIGGER_PAYLOAD_TEXT);
   const [triggerError, setTriggerError] = useState<string | null>(null);
@@ -2747,9 +2747,9 @@ export default function App() {
                 />
                 <StatCard
                   label="Scheduler"
-                  value={schedulerStatus?.scheduler?.running ? "Active" : "Stopped"}
-                  meta={`${schedulerStatus?.scheduler?.tickCount ?? 0} ticks`}
-                  tone={schedulerStatus?.scheduler?.running ? "success" : "danger"}
+                  value={schedulerStatus?.scheduler?.running ?? false ? "Active" : "Stopped"}
+                  meta={`${schedulerStatus?.scheduler?.tick_count ?? 0 ?? 0} ticks`}
+                  tone={schedulerStatus?.scheduler?.running ?? false ? "success" : "danger"}
                 />
                 <StatCard
                   label="Active Alerts"

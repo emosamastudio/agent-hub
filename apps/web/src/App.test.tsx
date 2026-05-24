@@ -6,7 +6,6 @@ import {
   AgentDirectoryPanel,
   AgentSettingsPanel,
   DashboardLanguageProvider,
-  type DashboardLanguage,
   ExecutionSummaryPanel,
   ExecutionFilterPanel,
   ExecutionHistoryPager,
@@ -17,6 +16,7 @@ import {
   dashboardDocumentLanguage,
   resolveInitialDashboardLanguage,
 } from "./App";
+import type { DashboardLanguage } from "./i18n/translations.js";
 import {
   agentSettingsPatchFromForm,
   executionDisplayTime,

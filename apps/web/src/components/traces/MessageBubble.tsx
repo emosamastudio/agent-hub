@@ -14,7 +14,6 @@ export function MessageBubble({ span }: MessageBubbleProps) {
   const inputTokens = span.inputTokens ?? span.input_tokens;
   const outputTokens = span.outputTokens ?? span.output_tokens;
   const toolCalls = (span.toolCalls ?? span.tool_calls) as any[];
-  const metadata = span.metadata as Record<string, unknown> | undefined;
 
   const roleLabel = role === "user" ? "User"
     : role === "assistant" ? (model ?? "Assistant")
