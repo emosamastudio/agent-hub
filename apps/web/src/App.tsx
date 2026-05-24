@@ -177,6 +177,7 @@ interface TraceSpan {
   span_type?: string;
   model?: string | null;
   latencyMs?: number | null;
+  metadata?: Record<string, unknown> | null;
   latency_ms?: number | null;
   inputContent?: string | null;
   input_content?: string | null;
