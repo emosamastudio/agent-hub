@@ -58,7 +58,7 @@ export function Sparkline({ data, width = 600, height = 160 }: SparklineProps) {
           bars.push({ y, h, color: STATUS_COLORS[status] ?? "#94a3b8", status });
         }
 
-        return bars.map((bar, _j => (
+        return bars.map((bar) => (
           <rect
             key={`${i}-${bar.status}`}
             x={x}
