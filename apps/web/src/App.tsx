@@ -47,6 +47,7 @@ import { Sparkline } from "./components/ui/Sparkline.js";
 import { Toggle } from "./components/ui/Toggle.js";
 import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
 import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
+import { ProjectSelector } from "./components/layout/ProjectSelector.js";
 import "./App.css";
 import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
@@ -773,10 +774,16 @@ function PageNavigation({
   activePage,
   pages,
   onNavigate,
+  projects,
+  projectScope,
+  onProjectScopeChange,
 }: {
   activePage: Page;
   pages: PageDefinition[];
   onNavigate: (p: Page) => void;
+  projects: Project[];
+  projectScope: string | null;
+  onProjectScopeChange: (id: string | null) => void;
 }) {
   const { t } = useDashboardLanguage();
   const primaryPages = pages.filter((p) =>
@@ -814,6 +821,11 @@ function PageNavigation({
         </span>
         <span>{t("nav.controlPlane")}</span>
       </div>
+      <ProjectSelector
+        projects={projects}
+        selectedProjectId={projectScope}
+        onSelect={onProjectScopeChange}
+      />
       <div className="page-nav__group">
         <span className="page-nav__title">{t("nav.workspace")}</span>
         {primaryPages.map(renderButton)}
@@ -1838,6 +1850,7 @@ export default function App() {
 
   /* data */
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectScope, setProjectScope] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [archivedAgents, setArchivedAgents] = useState<Agent[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
@@ -1947,11 +1960,17 @@ export default function App() {
 
     try {
       const executionLimit = executionHistoryLimitRef.current;
+      const agentParams = projectScope ? { project: projectScope } : undefined;
+      const execParams: Record<string, string> = projectScope
+        ? { projectId: projectScope, limit: String(executionLimit) }
+        : { limit: String(executionLimit) };
+      const archivedParams: Record<string, string> = { archived: "only" };
+      if (projectScope) archivedParams.project = projectScope;
       const [p, a, archived, e, s, al, scheduler] = await Promise.all([
         fetchProjects(),
-        fetchAgents(),
-        fetchAgents({ archived: "only" }),
-        fetchExecutions({ limit: String(executionLimit) }),
+        fetchAgents(agentParams),
+        fetchAgents(archivedParams),
+        fetchExecutions(execParams),
         fetchStats(),
         fetchAlerts({ limit: "10" }),
         fetchSchedulerStatus(),
@@ -1980,7 +1999,7 @@ export default function App() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [projectScope]);
 
   const loadFilteredExecutions = useCallback(async (
     values: ExecutionFilterValues,
@@ -2575,6 +2594,9 @@ export default function App() {
           <PageNavigation
             activePage={page}
             pages={pageDefinitions}
+            projects={projects}
+            projectScope={projectScope}
+            onProjectScopeChange={setProjectScope}
             onNavigate={(p) => {
               if (p === "detail" || p === "agent-detail") return; // only reachable via click
               setSelectedExecution(null);
