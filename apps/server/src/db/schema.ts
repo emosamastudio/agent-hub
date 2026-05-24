@@ -29,6 +29,7 @@ export const projects = pgTable("projects", {
   allowTriggerFrom: text("allow_trigger_from").array().default([]),
   triggerRateLimitPerSec: integer("trigger_rate_limit_per_sec").default(50),
   costConfig: jsonb("cost_config").default({}),
+  providerConfig: jsonb("provider_config"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
@@ -60,6 +61,7 @@ export const agents = pgTable("agents", {
   allowTriggerBy: jsonb("allow_trigger_by"),
   idempotencyWindowSeconds: integer("idempotency_window_seconds").notNull().default(3600),
   labels: jsonb("labels").default({}),
+  providerConfig: jsonb("provider_config"),
   lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
   lastExecutionAt: timestamp("last_execution_at", { withTimezone: true }),
   activeExecutionCount: integer("active_execution_count").notNull().default(0),
@@ -164,3 +166,17 @@ export const providerPricing = pgTable("provider_pricing", {
   outputCostPer1k: numeric("output_cost_per_1k", { precision: 10, scale: 6 }).notNull(),
   effectiveFrom: date("effective_from").notNull(),
 });
+
+// --- proxy_tokens ---
+export const proxyTokens = pgTable("proxy_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  executionId: uuid("execution_id").notNull().references(() => executions.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  tokenHashIdx: index("idx_proxy_tokens_token_hash").on(table.tokenHash),
+  expiresAtIdx: index("idx_proxy_tokens_expires_at").on(table.expiresAt),
+  executionIdIdx: index("idx_proxy_tokens_execution_id").on(table.executionId),
+}));

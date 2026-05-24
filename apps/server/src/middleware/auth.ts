@@ -35,6 +35,11 @@ export async function basicAuth(request: FastifyRequest, reply: FastifyReply) {
     return;
   }
 
+  // Skip auth for LLM proxy endpoints (use proxy token auth)
+  if (request.url.startsWith("/v1/")) {
+    return;
+  }
+
   // Skip auth for WebSocket upgrade (browsers can't set auth headers on WS)
   if (request.url === "/ws") {
     return;

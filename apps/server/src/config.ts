@@ -57,6 +57,10 @@ export function createServerConfig(env: Env = process.env) {
     traceRetentionDays: parsePositiveInt(env.AGENT_HUB_TRACE_RETENTION_DAYS, 30),
     alertRetentionDays: parsePositiveInt(env.AGENT_HUB_ALERT_RETENTION_DAYS, 180),
     maxTriggerDepth: parsePositiveInt(env.AGENT_HUB_MAX_TRIGGER_DEPTH, 5),
+    proxyTokenExpirySeconds: parsePositiveInt(env.AGENT_HUB_PROXY_TOKEN_EXPIRY_SECONDS, 600),
+    anthropicApiKey: env.AGENT_HUB_ANTHROPIC_API_KEY ?? "",
+    anthropicEndpoint: env.AGENT_HUB_ANTHROPIC_ENDPOINT ?? "https://api.anthropic.com",
+    encryptionKey: env.AGENT_HUB_ENCRYPTION_KEY ?? "",
     bootstrapDefaultProject,
     seedDemoAgent,
   } as const;
@@ -74,6 +78,7 @@ function validateProductionConfig(
     databaseUrl: string;
     dashboardPassword: string;
     defaultProjectApiKey: string;
+    anthropicApiKey: string;
   },
 ) {
   const invalidFields: string[] = [];
@@ -86,6 +91,9 @@ function validateProductionConfig(
   }
   if (!env.AGENT_HUB_DEFAULT_API_KEY || config.defaultProjectApiKey === defaultProjectApiKey) {
     invalidFields.push("AGENT_HUB_DEFAULT_API_KEY");
+  }
+  if (!env.AGENT_HUB_ANTHROPIC_API_KEY || config.anthropicApiKey === "") {
+    invalidFields.push("AGENT_HUB_ANTHROPIC_API_KEY");
   }
 
   if (invalidFields.length > 0) {

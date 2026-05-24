@@ -8,6 +8,7 @@ import { Cron } from "croner";
 import { getBearerToken, isValidDashboardBasicAuth } from "../middleware/auth.js";
 import { hashApiKey } from "../security.js";
 import { getSchedulerRuntimeStats } from "../services/scheduler.js";
+import { createLlmProxyHandler } from "./llm-proxy.js";
 
 interface ExtendedAppContext extends AppContext {}
 
@@ -620,6 +621,16 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
           await new Promise(r => setTimeout(r, 200));
           continue;
         }
+        // Generate proxy token for LLM trace capture
+        const rawToken = `agh_proxy_${randomBytes(32).toString("base64url")}`;
+        const tokenHash = hashApiKey(rawToken);
+        await ctx.proxyTokenRepo.create({
+          executionId: claimed.id,
+          tokenHash,
+          projectId: project.id,
+          expiresAt: new Date(Date.now() + serverConfig.proxyTokenExpirySeconds * 1000),
+        });
+        (claimed as Record<string, unknown>).proxyToken = rawToken;
         return reply.send(claimed);
       }
 
@@ -1236,4 +1247,13 @@ export function registerRoutes(app: FastifyInstance, ctx: ExtendedAppContext) {
     socket.on("error", () => { wsClients.delete(socket); });
     socket.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
   });
+
+  // ── LLM Proxy ──
+  app.post("/v1/messages", createLlmProxyHandler({
+    proxyTokenRepo: ctx.proxyTokenRepo,
+    traceRepo: ctx.traceRepo,
+    executionRepo: ctx.executionRepo,
+    anthropicApiKey: serverConfig.anthropicApiKey,
+    anthropicEndpoint: serverConfig.anthropicEndpoint,
+  }));
 }

@@ -20,6 +20,7 @@ test("disables bootstrap seed data by default in production", () => {
     DATABASE_URL: "postgres://agent_hub:secret@db.example.internal:5432/agent_hub",
     AGENT_HUB_DASHBOARD_PASSWORD: "not-the-default-password",
     AGENT_HUB_DEFAULT_API_KEY: "not-the-default-api-key",
+    AGENT_HUB_ANTHROPIC_API_KEY: "sk-ant-not-the-default-key",
   });
 
   assert.equal(config.bootstrapDefaultProject, false);
@@ -34,6 +35,7 @@ test("allows explicit production bootstrap for first install", () => {
     AGENT_HUB_DEFAULT_API_KEY: "not-the-default-api-key",
     AGENT_HUB_BOOTSTRAP_DEFAULT_PROJECT: "true",
     AGENT_HUB_SEED_DEMO_AGENT: "false",
+    AGENT_HUB_ANTHROPIC_API_KEY: "sk-ant-not-the-default-key",
   });
 
   assert.equal(config.bootstrapDefaultProject, true);

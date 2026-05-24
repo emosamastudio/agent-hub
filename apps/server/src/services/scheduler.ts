@@ -3,6 +3,7 @@ import type { AgentRepository } from "../repositories/agent-repository.js";
 import type { ExecutionRepository } from "../repositories/execution-repository.js";
 import type { TraceRepository } from "../repositories/trace-repository.js";
 import type { AlertRepository } from "../repositories/alert-repository.js";
+import type { ProxyTokenRepository } from "../repositories/proxy-token-repository.js";
 import { serverConfig } from "../config.js";
 import { getPool } from "../db/connection.js";
 import type pg from "pg";
@@ -29,6 +30,7 @@ export interface SchedulerContext {
   executionRepo: ExecutionRepository;
   traceRepo: TraceRepository;
   alertRepo: AlertRepository;
+  proxyTokenRepo: ProxyTokenRepository;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -461,4 +463,5 @@ async function retentionCleanup(ctx: SchedulerContext) {
   await ctx.executionRepo.expireOldTraces(serverConfig.traceRetentionDays);
   await ctx.executionRepo.expireOldExecutions(serverConfig.executionRetentionDays);
   await ctx.alertRepo.expireOld(serverConfig.alertRetentionDays);
+  await ctx.proxyTokenRepo.expireTokens();
 }

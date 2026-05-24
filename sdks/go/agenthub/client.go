@@ -65,6 +65,7 @@ type Job struct {
 	Status         string         `json:"status,omitempty"`
 	InputPayload   map[string]any `json:"inputPayload"`
 	TimeoutSeconds int            `json:"timeoutSeconds,omitempty"`
+	ProxyToken     string         `json:"proxyToken,omitempty"`
 }
 
 // Result is reported after a job handler finishes.

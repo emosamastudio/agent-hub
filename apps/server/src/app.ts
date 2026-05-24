@@ -8,6 +8,7 @@ import { AgentRepository } from "./repositories/agent-repository.js";
 import { ExecutionRepository } from "./repositories/execution-repository.js";
 import { TraceRepository } from "./repositories/trace-repository.js";
 import { AlertRepository } from "./repositories/alert-repository.js";
+import { ProxyTokenRepository } from "./repositories/proxy-token-repository.js";
 import { registerRoutes } from "./http/routes.js";
 import { basicAuth } from "./middleware/auth.js";
 import { serverConfig } from "./config.js";
@@ -19,6 +20,7 @@ export interface AppContext {
   executionRepo: ExecutionRepository;
   traceRepo: TraceRepository;
   alertRepo: AlertRepository;
+  proxyTokenRepo: ProxyTokenRepository;
 }
 
 export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppContext }> {
@@ -39,8 +41,9 @@ export async function createApp(): Promise<{ app: FastifyInstance; ctx: AppConte
   const executionRepo = new ExecutionRepository(db);
   const traceRepo = new TraceRepository(db);
   const alertRepo = new AlertRepository(db);
+  const proxyTokenRepo = new ProxyTokenRepository(db);
 
-  const ctx: AppContext = { db, projectRepo, agentRepo, executionRepo, traceRepo, alertRepo };
+  const ctx: AppContext = { db, projectRepo, agentRepo, executionRepo, traceRepo, alertRepo, proxyTokenRepo };
 
   // Dashboard Basic Auth
   app.addHook("onRequest", basicAuth);

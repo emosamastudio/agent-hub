@@ -73,6 +73,7 @@ export async function startAgentHubServer(): Promise<RunningAgentHubServer> {
     executionRepo: ctx.executionRepo,
     traceRepo: ctx.traceRepo,
     alertRepo: ctx.alertRepo,
+    proxyTokenRepo: ctx.proxyTokenRepo,
   }, {
     logger: app.log,
   });
