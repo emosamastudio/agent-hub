@@ -1,3 +1,5 @@
+import type { TraceSpan } from "./types.js";
+
 export interface AgentSettingsFormValues {
   displayName: string;
   cronExpression: string;
@@ -95,4 +97,33 @@ export function parseTriggerPayload(text: string): Record<string, unknown> {
   }
 
   return parsed as Record<string, unknown>;
+}
+
+export interface Round {
+  turnIndex: number;
+  spans: TraceSpan[];
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalLatencyMs: number;
+}
+
+export function groupTracesIntoTurns(spans: TraceSpan[]): Round[] {
+  const map = new Map<number, TraceSpan[]>();
+  for (const span of spans) {
+    const ti = span.turnIndex ?? span.turn_index ?? 0;
+    if (!map.has(ti)) map.set(ti, []);
+    map.get(ti)!.push(span);
+  }
+  const rounds: Round[] = [];
+  for (const [turnIndex, turnSpans] of map) {
+    let totalTokensIn = 0, totalTokensOut = 0, totalLatencyMs = 0;
+    for (const s of turnSpans) {
+      totalTokensIn += s.inputTokens ?? s.input_tokens ?? 0;
+      totalTokensOut += s.outputTokens ?? s.output_tokens ?? 0;
+      totalLatencyMs += s.latencyMs ?? s.latency_ms ?? 0;
+    }
+    rounds.push({ turnIndex, spans: turnSpans.sort((a, b) => (a.spanIndex ?? a.span_index ?? 0) - (b.spanIndex ?? b.span_index ?? 0)), totalTokensIn, totalTokensOut, totalLatencyMs });
+  }
+  rounds.sort((a, b) => a.turnIndex - b.turnIndex);
+  return rounds;
 }

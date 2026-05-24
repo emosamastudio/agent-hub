@@ -40,6 +40,8 @@ import {
   type ExecutionFilterValues,
   type ExecutionQueryOptions,
 } from "./lib/dashboard-helpers";
+import { TraceChatView } from "./components/traces/TraceChatView.js";
+import { TraceRawView } from "./components/traces/TraceRawView.js";
 import "./App.css";
 import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SocketStatus, DashboardLanguage } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
@@ -1823,6 +1825,7 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [schedulePreview, setSchedulePreview] = useState<string[]>([]);
   const [schedulePreviewLoading, setSchedulePreviewLoading] = useState(false);
+  const [traceViewMode, setTraceViewMode] = useState<"chat" | "raw">("chat");
   const [actionBusyExecutionId, setActionBusyExecutionId] = useState<string | null>(null);
   const [triggerPayloadText, setTriggerPayloadText] = useState(DEFAULT_TRIGGER_PAYLOAD_TEXT);
   const [triggerError, setTriggerError] = useState<string | null>(null);
@@ -2927,167 +2930,17 @@ export default function App() {
                   </button>
                 </header>
 
-                {!Array.isArray(traces) || traces.length === 0 ? (
-                  <div className="empty-state">
-                    <span className="empty-state__icon">
-                      <Icon name="tray" />
-                    </span>
-                    <h3>{t("traces.emptyTitle")}</h3>
-                    <p>
-                      {t("traces.emptyDescription")}
-                    </p>
+                <div className="trace-viewer">
+                  <div className="trace-toolbar">
+                    <button onClick={() => window.open(`data:text/json,${encodeURIComponent(JSON.stringify(traces, null, 2))}`)} className="ghost-button">
+                      View Raw JSON
+                    </button>
                   </div>
-                ) : (
-                  <ul className="timeline-list">
-                    {traces.map((trace, i) => {
-                      const turnIndex = trace.turnIndex ?? trace.turn_index ?? 0;
-                      const spanIndex = trace.spanIndex ?? trace.span_index ?? 0;
-                      const spanType = trace.spanType ?? trace.span_type ?? "span";
-                      const latencyMs = trace.latencyMs ?? trace.latency_ms;
-                      const inputContent = trace.inputContent ?? trace.input_content;
-                      const outputContent = trace.outputContent ?? trace.output_content;
-                      const inputTokens = trace.inputTokens ?? trace.input_tokens;
-                      const outputTokens = trace.outputTokens ?? trace.output_tokens;
-                      const isLlm = spanType === "llm";
-                      const isUser = (trace.role ?? "") === "user";
-                      const isAssistant = (trace.role ?? "") === "assistant";
-                      const isChat = isLlm && (isUser || isAssistant);
-                      const rawInput = (trace.metadata as any)?._rawInput;
-                      const rawOutput = (trace.metadata as any)?._rawOutput;
-
-                      if (isChat) {
-                        return (
-                          <div key={i} style={{ marginBottom: "1.25rem" }}>
-                            <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginBottom: "0.4rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                              <strong>{t("traces.turn")} {turnIndex}</strong>
-                              <span>{trace.model}</span>
-                              {latencyMs ? <span>{latencyMs}ms</span> : null}
-                              {inputTokens != null ? <span>{inputTokens}↑</span> : null}
-                              {outputTokens != null ? <span>{outputTokens}↓</span> : null}
-                            </div>
-                            {inputContent ? (
-                              <div style={{
-                                background: "rgba(59,130,246,0.12)",
-                                borderLeft: "3px solid rgba(59,130,246,0.5)",
-                                padding: "0.6rem 0.85rem",
-                                borderRadius: "0 12px 12px 12px",
-                                marginBottom: "0.4rem",
-                                fontSize: "0.85rem",
-                                lineHeight: "1.6",
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                                maxHeight: 300,
-                                overflow: "auto",
-                              }}>
-                                {inputContent}
-                              </div>
-                            ) : null}
-                            {outputContent ? (
-                              <div style={{
-                                background: "rgba(34,197,94,0.08)",
-                                borderLeft: "3px solid rgba(34,197,94,0.4)",
-                                padding: "0.6rem 0.85rem",
-                                borderRadius: "0 12px 12px 12px",
-                                fontSize: "0.85rem",
-                                lineHeight: "1.6",
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                                maxHeight: 400,
-                                overflow: "auto",
-                              }}>
-                                {outputContent}
-                              </div>
-                            ) : null}
-                            {(rawInput || rawOutput) ? (
-                              <details style={{ marginTop: "0.4rem", fontSize: "0.75rem" }}>
-                                <summary style={{ color: "var(--color-muted)", cursor: "pointer" }}>{t("actions.viewRaw")}</summary>
-                                {rawInput ? (
-                                  <pre style={{ whiteSpace: "pre-wrap", maxHeight: 150, overflow: "auto", fontSize: "0.72rem", background: "rgba(15,23,42,0.62)", padding: "0.5rem", borderRadius: 8, marginTop: 4 }}>
-                                    {typeof rawInput === "string" ? rawInput.slice(0, 2000) : JSON.stringify(rawInput, null, 2).slice(0, 2000)}
-                                  </pre>
-                                ) : null}
-                                {rawOutput ? (
-                                  <pre style={{ whiteSpace: "pre-wrap", maxHeight: 150, overflow: "auto", fontSize: "0.72rem", background: "rgba(15,23,42,0.62)", padding: "0.5rem", borderRadius: 8, marginTop: 4 }}>
-                                    {typeof rawOutput === "string" ? rawOutput.slice(0, 2000) : JSON.stringify(rawOutput, null, 2).slice(0, 2000)}
-                                  </pre>
-                                ) : null}
-                              </details>
-                            ) : null}
-                          </div>
-                        );
-                      }
-
-                      // Non-LLM traces: keep existing timeline style
-                      return (
-                      <li key={i} className="timeline-item">
-                        <div
-                          className={`event-dot event-dot--${getStatusTone(
-                            trace.status ?? "neutral",
-                          )}`}
-                        />
-                        <div className="timeline-item__body">
-                          <p>
-                            <strong>
-                              {t("traces.turn")} {turnIndex}.{spanIndex}
-                            </strong>{" "}
-                            &mdash; {spanType} ({trace.role ?? t("traces.unknown")})
-                            {trace.model ? ` &mdash; ${trace.model}` : ""}
-                            {latencyMs
-                              ? ` &mdash; ${latencyMs}ms`
-                              : ""}
-                          </p>
-                          {inputContent ? (
-                            <details>
-                              <summary>{t("traces.input")}</summary>
-                              <pre
-                                style={{
-                                  whiteSpace: "pre-wrap",
-                                  maxHeight: 200,
-                                  overflow: "auto",
-                                  background: "rgba(15,23,42,0.62)",
-                                  padding: "0.75rem",
-                                  borderRadius: 12,
-                                  marginTop: 8,
-                                  fontSize: "0.82rem",
-                                }}
-                            >
-                                {inputContent.slice(0, 2000)}
-                              </pre>
-                            </details>
-                          ) : null}
-                          {outputContent ? (
-                            <details>
-                              <summary>{t("traces.output")}</summary>
-                              <pre
-                                style={{
-                                  whiteSpace: "pre-wrap",
-                                  maxHeight: 200,
-                                  overflow: "auto",
-                                  background: "rgba(15,23,42,0.62)",
-                                  padding: "0.75rem",
-                                  borderRadius: 12,
-                                  marginTop: 8,
-                                  fontSize: "0.82rem",
-                                }}
-                            >
-                                {outputContent.slice(0, 2000)}
-                              </pre>
-                            </details>
-                          ) : null}
-                          <div className="timeline-item__meta">
-                            {inputTokens != null
-                              ? `${inputTokens} ${t("traces.inTokens")}`
-                              : ""}
-                            {outputTokens != null
-                              ? ` / ${outputTokens} ${t("traces.outTokens")}`
-                              : ""}
-                          </div>
-                        </div>
-                      </li>
-                      );
-                    })}
-                  </ul>
-                )}
+                  {traceViewMode === "chat"
+                    ? <TraceChatView traces={traces} />
+                    : <TraceRawView traces={traces} />
+                  }
+                </div>
               </div>
             </>
           )}
