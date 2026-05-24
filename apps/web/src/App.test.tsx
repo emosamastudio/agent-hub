@@ -16,7 +16,7 @@ import {
   dashboardDocumentLanguage,
   resolveInitialDashboardLanguage,
 } from "./App";
-import type { DashboardLanguage } from "./i18n/translations.js";
+import type { DashboardLanguage } from "./lib/types.js";
 import {
   agentSettingsPatchFromForm,
   executionDisplayTime,

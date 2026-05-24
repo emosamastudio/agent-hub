@@ -52,7 +52,7 @@ import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
 import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
 import { ProjectSelector } from "./components/layout/ProjectSelector.js";
 import "./App.css";
-import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, DashboardLanguage } from "./lib/types.js";
+import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, MisfirePolicy } from "./lib/types.js";
 import { getTranslations } from "./i18n/translations.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
@@ -2747,9 +2747,9 @@ export default function App() {
                 />
                 <StatCard
                   label="Scheduler"
-                  value={schedulerStatus?.scheduler?.running ?? false ? "Active" : "Stopped"}
-                  meta={`${schedulerStatus?.scheduler?.tick_count ?? 0 ?? 0} ticks`}
-                  tone={schedulerStatus?.scheduler?.running ?? false ? "success" : "danger"}
+                  value={schedulerRuntimeStats?.running ? "Active" : "Stopped"}
+                  meta={`${schedulerRuntimeStats?.tick_count ?? 0} ticks`}
+                  tone={schedulerRuntimeStats?.running ? "success" : "danger"}
                 />
                 <StatCard
                   label="Active Alerts"
