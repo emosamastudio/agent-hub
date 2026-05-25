@@ -2856,7 +2856,18 @@ export default function App() {
                 onClearSelection={() => setSelectedAgentIds([])}
               />
               <AgentDirectoryPanel
-                agents={agents}
+                agents={agents.filter((a) => {
+                  const s = agentFilters.search?.toLowerCase();
+                  if (s && !a.displayName.toLowerCase().includes(s) && !a.name.toLowerCase().includes(s)) return false;
+                  if (agentFilters.projectId && a.projectId !== agentFilters.projectId) return false;
+                  if (agentFilters.agentType && a.agentType !== agentFilters.agentType) return false;
+                  if (agentFilters.status === "online" && a.executorStatus !== "online") return false;
+                  if (agentFilters.status === "offline" && a.executorStatus !== "offline") return false;
+                  if (agentFilters.status === "disabled" && a.enabled) return false;
+                  if (agentFilters.schedule === "cron" && !a.cronExpression) return false;
+                  if (agentFilters.schedule === "manual" && a.cronExpression) return false;
+                  return true;
+                })}
                 projects={projects}
                 schedulerStatus={schedulerStatus}
                 eyebrow={t("agentDirectory.directoryEyebrow")}
