@@ -38,11 +38,21 @@ export function buildDashboardAuthHeaders(runtime: DashboardAuthRuntime): Record
 }
 
 export function authHeaders(): Record<string, string> {
-  return buildDashboardAuthHeaders({
-    username: import.meta.env.VITE_AGENT_HUB_DASHBOARD_USER ?? "admin",
-    defaultPassword: resolveDashboardDefaultPassword(import.meta.env),
-    storage: window.sessionStorage,
-    prompt: window.prompt.bind(window),
-    encode: window.btoa.bind(window),
-  });
+  const username = import.meta.env.VITE_AGENT_HUB_DASHBOARD_USER ?? "admin";
+  const defaultPassword = resolveDashboardDefaultPassword(import.meta.env);
+  const cachedPassword = window.sessionStorage.getItem(DASHBOARD_PASSWORD_STORAGE_KEY);
+  const password = defaultPassword
+    ?? cachedPassword
+    ?? window.prompt("Agent Hub dashboard password");
+
+  if (cachedPassword === null && defaultPassword === undefined && password !== null) {
+    window.sessionStorage.setItem(DASHBOARD_PASSWORD_STORAGE_KEY, password);
+  }
+
+  // Use TextEncoder for safe Base64 encoding of any Unicode characters
+  const credentials = `${username}:${password ?? ""}`;
+  const bytes = new TextEncoder().encode(credentials);
+  const base64 = btoa(String.fromCharCode(...bytes));
+
+  return { Authorization: `Basic ${base64}` };
 }
