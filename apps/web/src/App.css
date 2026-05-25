@@ -4124,3 +4124,35 @@
 .cron-agent-row__body { padding: 0.5rem 2.5rem 1rem; }
 .cron-agent-row__detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.4rem; font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.5rem; }
 .cron-agent-row__preview { font-size: 0.82rem; color: #94a3b8; }
+
+/* Agent Mini Chip (overview page) */
+.agent-mini-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.5rem; background: rgba(255,255,255,0.04); border: 1px solid rgba(73,120,190,0.12); border-radius: 6px; font-size: 0.75rem; cursor: default; }
+.agent-mini-chip:hover { background: rgba(255,255,255,0.08); border-color: rgba(73,120,190,0.25); }
+
+/* Agent Health Grid */
+.agent-health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem; }
+.agent-health-tile { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(18px); border: 1px solid rgba(73, 120, 190, 0.15); border-left: 4px solid #3b82f6; border-radius: 10px; padding: 0.5rem 0.6rem; cursor: pointer; transition: all 0.15s ease; display: flex; flex-direction: column; gap: 0.25rem; }
+.agent-health-tile:hover { background: rgba(15, 23, 42, 0.9); border-color: rgba(96, 165, 250, 0.3); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); }
+.agent-health-tile--problem { border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.06); }
+.agent-health-tile--problem:hover { border-color: rgba(239, 68, 68, 0.6); background: rgba(239, 68, 68, 0.1); }
+.agent-health-tile__header { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.agent-health-tile__type { font-size: 0.85rem; flex-shrink: 0; line-height: 1; }
+.agent-health-tile__name { font-size: 0.78rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-health-tile__status-row { display: flex; align-items: center; gap: 0.3rem; }
+.agent-health-tile__status-label { font-size: 0.68rem; color: #94a3b8; }
+.agent-health-tile__running { font-size: 0.65rem; color: #60a5fa; margin-left: auto; font-weight: 500; }
+.agent-health-tile__dots { display: flex; gap: 3px; }
+.agent-health-tile__dot { width: 10px; height: 10px; border-radius: 3px; }
+.agent-health-tile__dot--success { background: #22c55e; }
+.agent-health-tile__dot--failed, .agent-health-tile__dot--danger { background: #ef4444; }
+.agent-health-tile__dot--timeout, .agent-health-tile__dot--warning { background: #f59e0b; }
+.agent-health-tile__dot--running, .agent-health-tile__dot--info { background: #3b82f6; }
+.agent-health-tile__dot--queued { background: #64748b; }
+.agent-health-tile__dot--empty, .agent-health-tile__dot--neutral { background: rgba(148, 163, 184, 0.2); }
+.agent-health-tile__cron { margin-top: 0.1rem; }
+.agent-health-tile__cron code { font-size: 0.62rem; background: rgba(15, 23, 42, 0.5); padding: 0.1rem 0.35rem; border-radius: 3px; color: #60a5fa; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-health-tile__desc { font-size: 0.65rem; color: #94a3b8; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Pulse animation */
+.status-dot.pulse { animation: status-pulse 2s ease-in-out infinite; }
+@keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }

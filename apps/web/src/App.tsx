@@ -50,6 +50,7 @@ import { Sparkline } from "./components/ui/Sparkline.js";
 import { Toggle } from "./components/ui/Toggle.js";
 import { AgentFilterBar } from "./components/agents/AgentFilterBar.js";
 import { AgentBulkToolbar } from "./components/agents/AgentBulkToolbar.js";
+import { AgentHealthGrid } from "./components/agents/AgentHealthGrid.js";
 import { ProjectSelector } from "./components/layout/ProjectSelector.js";
 import "./App.css";
 import type { Page, Project, Agent, Execution, TraceSpan, DashboardStats, AlertEntry, SchedulerAgentStatus, SchedulerRuntimeStats, SocketStatus, MisfirePolicy, DashboardLanguage } from "./lib/types.js";
@@ -2796,23 +2797,26 @@ export default function App() {
                 actionBusyAlertId={actionBusyAlertId}
               />
 
-              <AgentDirectoryPanel
-                agents={agents}
-                projects={projects}
-                schedulerStatus={schedulerStatus}
-                eyebrow={t("agentDirectory.overviewEyebrow")}
-                title={t("agentDirectory.statusTitle")}
-                description={t("agentDirectory.statusDescription")}
-                emptyTitle={t("agentDirectory.emptyTitle")}
-                emptyDescription={t("agentDirectory.emptyDescription")}
-                deleteBusyAgentId={deleteBusyAgentId}
-                drainBusyAgentId={drainBusyAgentId}
-                onOpenAgent={openAgentDetail}
-                onToggleAgent={handleToggleAgent}
-                onTriggerAgent={handleTriggerAgent}
-                onDrainAgent={handleDrainAgent}
-                onDeleteAgent={handleDeleteAgent}
-              />
+              {/* Agent Health Grid — tile grid with project color stripes */}
+              <div className="panel">
+                <div className="panel__header">
+                  <h3>Agent Health</h3>
+                  <span style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                    {agents.filter(a => a.executorStatus === "online").length}/{agents.length} online
+                  </span>
+                </div>
+                <div style={{ padding: "0.5rem 0.75rem 0.75rem" }}>
+                  <AgentHealthGrid
+                    agents={agents}
+                    executions={executions}
+                    schedulerStatus={schedulerStatus}
+                    projectColors={{
+                      "8299b6ee-0f3f-4738-b4c3-e4cfded370be": "#3b82f6", // OPH
+                    }}
+                    onOpenAgent={openAgentDetail}
+                  />
+                </div>
+              </div>
             </>
           )}
 
