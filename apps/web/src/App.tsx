@@ -1295,6 +1295,9 @@ export function AgentDirectoryPanel({
                       <div className="table-primary">
                         <strong>{agentDisplayName(agent)}</strong>
                       </div>
+                      {agent.description ? (
+                        <div className="table-secondary" style={{ maxWidth: 280 }}>{agent.description}</div>
+                      ) : null}
                     </td>
                     <td>
                       <code>{agent.cronExpression || t("table.manual")}</code>
