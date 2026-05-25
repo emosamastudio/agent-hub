@@ -1981,7 +1981,7 @@ export default function App() {
       const executionLimit = executionHistoryLimitRef.current;
       const agentParams = projectScope ? { project: projectScope } : undefined;
       const execParams: Record<string, string> = projectScope
-        ? { projectId: projectScope, limit: String(executionLimit) }
+        ? { project: projectScope, limit: String(executionLimit) }
         : { limit: String(executionLimit) };
       const archivedParams: Record<string, string> = { archived: "only" };
       if (projectScope) archivedParams.project = projectScope;
