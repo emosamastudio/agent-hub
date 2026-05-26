@@ -3159,7 +3159,10 @@ export default function App() {
 
                 <div className="trace-viewer">
                   <div className="trace-toolbar">
-                    <button onClick={() => window.open(`data:text/json,${encodeURIComponent(JSON.stringify(traces, null, 2))}`)} className="ghost-button">
+                    <button onClick={() => {
+                      const blob = new Blob([JSON.stringify(traces, null, 2)], { type: "application/json" });
+                      window.open(URL.createObjectURL(blob));
+                    }} className="ghost-button">
                       View Raw JSON
                     </button>
                   </div>
